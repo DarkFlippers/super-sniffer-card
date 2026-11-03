@@ -16,15 +16,22 @@ do the arithmetic.
 
 ## How to use it
 
-1. Set the card's UID to the UID of the card you want keys for. **Not yet done by this app** -
-   use Proxmark3 (`hf mf supercard -u <uid>`), the vendor's Android app, or NFC Magic if your
-   sniffer is a Gen4-based one.
-2. Hold the sniffer card against the reader two or three times. Each tap records one
-   authentication, and a key needs two of them.
-3. Open this app, pick **Read Sniffer Card**, hold the card against the Flipper.
-4. Press **Save**. The captures are appended to `/ext/nfc/.mfkey32.log`.
-5. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
+Pick **Recover Keys** and the app walks the whole thing:
+
+1. Hold the card you want keys for against the Flipper. The app reads its UID and size, and names
+   the UID length so you know which sniffer card will take it.
+2. Hold the **sniffer** card against the Flipper. Its UID is set to the original's, then read back
+   off the card to confirm it took.
+3. Take the sniffer card to the reader and hold it there at least twice. Each tap records one
+   authentication, and recovering a key needs two of the same sector.
+4. Come back, press **Read**, hold the sniffer card against the Flipper. The app lists what it
+   captured.
+5. Press **Save**. The pairs are appended to `/ext/nfc/.mfkey32.log`.
+6. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
    Flipper's NFC app can then read the original card.
+
+**Read Sniffer Card** and **Set Sniffer UID** do steps 4-5 and steps 1-2 on their own, for when
+only one of them is wanted.
 
 ## Why MFKey does the recovery
 
@@ -44,11 +51,17 @@ from a sniffer card accumulate side by side.
 
 | Revision | How it is read | Status |
 |---|---|---|
-| Gen2 | plain `30 00`..`30 07`, 16 bytes a slot | read |
+| Gen2 | plain `30 00`..`30 07`, 16 bytes a slot | read, UID write |
 | Gen1 | ISO14443-4 APDU `00 A6 B0 00 10`, DES-encrypted | not yet |
 | Furui | `AA A8 00 <i>`, 18 bytes a slot | not yet |
 
-Setting the UID is not implemented for any revision yet.
+The Gen2 UID write is the one thing here that Proxmark3 cannot do - `hf mf supercard` answers
+"Not supported on this card" for Gen2. The sequence came out of the vendor app: five READ commands
+that mean nothing as reads (`30 F3`, `30 2A`, `30 BD`, `30 EF`, `30 01`) and then one command per
+UID byte. The vendor app always sends seven UID bytes, zero-padding a 4-byte UID, which makes the
+last three commands a read of page 0; that is mirrored rather than shortened, because seven is what
+is known to work and four is a guess. It is also why the app reads the UID back off the card before
+calling a write a success.
 
 Gen2 identification is deliberately passive: the card is recognised by answering an
 unauthenticated `30 00` while presenting a MIFARE Classic SAK, which a genuine Classic refuses

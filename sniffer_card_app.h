@@ -46,6 +46,15 @@ typedef struct {
     size_t trace_count;
     size_t slots_read;
 
+    // The card the keys are wanted for, read off it rather than typed, and the UID the sniffer
+    // card is to be given.
+    SnifferCardIdentity target;
+
+    // Whether the UID write is a step of the guided run or an errand of its own. The two share
+    // every screen up to the write and differ only in where they go after it, which is not
+    // something the scene stack can answer: both were reached from the menu.
+    bool guided;
+
     // Text built once on entering a screen and held while that screen draws it: Widget keeps the
     // pointer it is given rather than copying the string.
     FuriString* text;
@@ -61,9 +70,13 @@ typedef enum {
 // above any index a submenu in this app can produce.
 typedef enum {
     SnifferCardAppCustomEventPollerDone = 100, /**< The NFC session reached a verdict. */
-    SnifferCardAppCustomEventSave, /**< Right button on the result screen. */
+    SnifferCardAppCustomEventSave, /**< Right button on the trace result screen. */
     SnifferCardAppCustomEventRetry,
+    SnifferCardAppCustomEventNext, /**< Right button on a screen that only moves forward. */
 } SnifferCardAppCustomEvent;
 
 /** Take the result of a finished session out of the poller and into the app. */
 void sniffer_card_app_take_result(SnifferCardApp* app);
+
+/** Write a UID out as spaced hex bytes, the way the NFC app shows one. */
+void sniffer_card_app_uid_text(const uint8_t* uid, size_t uid_len, FuriString* text);

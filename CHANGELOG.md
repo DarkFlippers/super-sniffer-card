@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2
+
+- Add the guided run: read the card you want keys for, set the sniffer card's UID to match, go to the reader, come back and read the captures, save them. Each step is also reachable on its own from the menu, for when only one of them is wanted
+- Set a Gen2 sniffer card's UID, which Proxmark3 cannot - `hf mf supercard` answers "Not supported on this card" for Gen2. The sequence came out of the vendor app: five READ commands that mean nothing as reads (`30 F3`, `30 2A`, `30 BD`, `30 EF`, `30 01`), then one command per UID byte
+- Send seven UID bytes whatever the UID's length, zero-padding a 4-byte one, which turns the last three commands into a read of page 0. Mirrored from the vendor app rather than shortened to four: seven is what is known to work on real cards and four is a guess
+- Read the UID back off the card before calling a write a success, by cycling the field rather than halting the card. A HLTA would leave it answering only WUPA, and the firmware activates with REQA alone, so a halted card would never come back and every write would read as unconfirmed; returning `NfcCommandReset` takes the field down for 100 ms and brings it up, which powers the card out of whatever state the write left it in
+- Separate "the card came back as something else" from "the card did not come back", because only the first is a failed write. A card lifted off the Flipper too early looks like the second, and the run can carry on from there - reading it is how the user finds out either way
+- Refuse a UID of a different length from the sniffer card's own, as the vendor app does. These cards are physically a 4-byte or a 7-byte part, and a UID of the wrong length has nowhere to go
+- Name the original card's UID length and size on screen, since that is what decides which of the four sniffer card variants will take it
+- Size the original card from its SAK by testing bits rather than whole values, per AN10833 and the firmware's own detection, with Mini matched before 1K because it shares the 1K bit
+
 ## 0.1
 
 - Initial release: read the authentications a Gen2 Super Sniffer card captured from a reader, and append them to the MFKey nonce log so MFKey can recover the keys

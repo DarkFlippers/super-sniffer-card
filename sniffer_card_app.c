@@ -27,6 +27,16 @@ void sniffer_card_app_take_result(SnifferCardApp* app) {
     app->result = sniffer_card_poller_get_result(app->poller);
 }
 
+void sniffer_card_app_uid_text(const uint8_t* uid, size_t uid_len, FuriString* text) {
+    furi_assert(uid);
+    furi_assert(text);
+
+    furi_string_reset(text);
+    for(size_t i = 0; i < uid_len; i++) {
+        furi_string_cat_printf(text, i ? " %02X" : "%02X", uid[i]);
+    }
+}
+
 static SnifferCardApp* sniffer_card_app_alloc(void) {
     SnifferCardApp* app = malloc(sizeof(SnifferCardApp));
 
@@ -60,6 +70,8 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
     app->result = SnifferCardPollerResultWaiting;
     app->trace_count = 0;
     app->slots_read = 0;
+    memset(&app->target, 0, sizeof(app->target));
+    app->guided = false;
     app->text = furi_string_alloc();
 
     return app;

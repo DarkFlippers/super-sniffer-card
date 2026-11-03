@@ -20,7 +20,11 @@ void sniffer_card_app_scene_read_on_enter(void* context) {
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewPopup);
 
-    sniffer_card_poller_start(app->poller, sniffer_card_app_scene_read_poller_callback, app);
+    sniffer_card_poller_start(
+        app->poller,
+        SnifferCardPollerModeReadTraces,
+        sniffer_card_app_scene_read_poller_callback,
+        app);
 }
 
 bool sniffer_card_app_scene_read_on_event(void* context, SceneManagerEvent event) {

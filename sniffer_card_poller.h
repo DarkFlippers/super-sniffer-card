@@ -1,20 +1,68 @@
 /**
  * @file sniffer_card_poller.h
- * @brief One session with a Gen2 Super Sniffer card: activate it and read its trace slots.
+ * @brief One session over the radio: read a card's identity, read a sniffer card's trace slots,
+ *        or program a sniffer card's UID.
  */
 #pragma once
 
 #include <nfc/nfc.h>
+#include <nfc/protocols/iso14443_3a/iso14443_3a.h>
+#include <nfc/protocols/mf_classic/mf_classic.h>
 
 #include "sniffer_card.h"
+
+/** What a session is for. */
+typedef enum {
+    /** Activate whatever is on the Flipper and keep its UID and SAK. Used on the card the keys
+     * are wanted for, and to check what a sniffer card currently answers as. */
+    SnifferCardPollerModeReadIdentity,
+    /** Read a Gen2 sniffer card's trace slots. */
+    SnifferCardPollerModeReadTraces,
+    /** Program a Gen2 sniffer card's UID, then re-activate it and check what it answers as. */
+    SnifferCardPollerModeWriteUid,
+} SnifferCardPollerMode;
 
 /** How the session ended. */
 typedef enum {
     SnifferCardPollerResultWaiting, /**< Nothing on the Flipper yet. */
-    SnifferCardPollerResultSuccess, /**< Slots were read; the trace count may still be zero. */
-    SnifferCardPollerResultNotSniffer, /**< A tag answered, and it is not one of these cards. */
-    SnifferCardPollerResultError, /**< The tag went away mid-read, or answered nonsense. */
+    SnifferCardPollerResultSuccess,
+    /** A tag answered and it is not what this session needed - not a sniffer card for a trace
+     * read, or not a MIFARE Classic for an identity read. */
+    SnifferCardPollerResultWrongCard,
+    /** The sniffer card's UID is a different length from the one asked for. These cards are
+     * physically a 4-byte or a 7-byte part and cannot be made into the other. */
+    SnifferCardPollerResultUidLenMismatch,
+    /** The UID was written and the card came back answering as something else. */
+    SnifferCardPollerResultWriteMismatch,
+    /** The UID was written and the card did not come back at all, so nothing confirms it. */
+    SnifferCardPollerResultWriteUnverified,
+    SnifferCardPollerResultError, /**< The tag went away mid-session, or answered nonsense. */
 } SnifferCardPollerResult;
+
+/** What a tag answered during activation. */
+typedef struct {
+    uint8_t uid[ISO14443_3A_MAX_UID_SIZE];
+    size_t uid_len;
+    uint8_t sak;
+} SnifferCardIdentity;
+
+/** The MIFARE Classic size a SAK declares.
+ *
+ * AN10833 encodes the size as bits rather than whole values, which is what the firmware's own
+ * `mf_classic_poller_handler_detect_type()` tests - so a magic card that answers every block is
+ * not mis-sized against its own SAK. Mini shares the 1K bit and has to be matched first.
+ *
+ * @return MfClassicTypeNum when the SAK is not a Classic at all
+ */
+MfClassicType sniffer_card_identity_get_type(const SnifferCardIdentity* identity);
+
+/** The card size as a label, for a screen that has to name it.
+ *
+ * Its own function because the SDK exports no name for a bare MfClassicType -
+ * `mf_classic_get_device_name()` wants a whole MfClassicData, which an activation alone does not
+ * produce.
+ */
+const char* sniffer_card_identity_get_type_name(const SnifferCardIdentity* identity);
 
 typedef struct SnifferCardPoller SnifferCardPoller;
 
@@ -29,15 +77,22 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc);
 
 void sniffer_card_poller_free(SnifferCardPoller* instance);
 
+/** The UID a SnifferCardPollerModeWriteUid session should program. Set it before starting. */
+void sniffer_card_poller_set_uid(SnifferCardPoller* instance, const uint8_t* uid, size_t uid_len);
+
 /** Begin looking for a card. Keeps looking until a tag answers, or until stopped. */
 void sniffer_card_poller_start(
     SnifferCardPoller* instance,
+    SnifferCardPollerMode mode,
     SnifferCardPollerCallback callback,
     void* context);
 
 void sniffer_card_poller_stop(SnifferCardPoller* instance);
 
 SnifferCardPollerResult sniffer_card_poller_get_result(const SnifferCardPoller* instance);
+
+/** What the tag answered as. After a UID write this is what it answered as afterwards. */
+const SnifferCardIdentity* sniffer_card_poller_get_identity(const SnifferCardPoller* instance);
 
 /** The captures the session read, valid until the next start.
  *

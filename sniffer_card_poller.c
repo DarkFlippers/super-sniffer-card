@@ -12,6 +12,24 @@
  */
 #define SNIFFER_CARD_CMD_READ (0x30)
 
+/** The five commands that arm a UID write, in order, from the vendor app's `SetUID` path
+ * (`com.fnstar.sniffercard.NFCReadActivity`).
+ *
+ * They are READ commands by opcode, and the pages they name mean nothing as pages - the sequence
+ * itself is the knock. Proxmark3 has no equivalent: `hf mf supercard` answers "Not supported on
+ * this card" for Gen2, so this is the one thing the vendor app knows that it does not.
+ */
+static const uint8_t sniffer_card_uid_knock[] = {0xF3, 0x2A, 0xBD, 0xEF, 0x01};
+
+/** UID bytes the knock expects, whatever the card's own UID length.
+ *
+ * The vendor app always sends seven, zero-padding a 4-byte UID, which makes the last three
+ * commands `30 00` - a read of page 0 by opcode. Mirrored rather than shortened: seven is what is
+ * known to work on real cards, and a four-command variant is a guess. It is also why a write is
+ * read back before being called a success.
+ */
+#define SNIFFER_CARD_UID_WRITE_BYTES 7
+
 #define SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE (64U)
 #define SNIFFER_CARD_POLLER_MAX_FWT         (150000U)
 
@@ -23,19 +41,69 @@
  */
 #define SNIFFER_CARD_SAK_NOT_CLASSIC (0x00)
 
+/** Where a UID-write session has got to.
+ *
+ * The write and the read-back are two activations of the same card: a card that has just been
+ * given a new UID is still selected under the old one, so it has to be selected again before it
+ * will say what it has become.
+ *
+ * Getting there is a field cycle, not a HLTA. Halting the card would leave it answering only
+ * WUPA, and the firmware activates with REQA alone
+ * (`iso14443_3a_poller_activate()` -> `NfcIso14443aShortFrameSensReq`), so a halted card would
+ * never come back and every write would read as unconfirmed. Returning NfcCommandReset instead
+ * takes the field down for 100 ms and brings it up
+ * (`nfc_worker_poller_reset_handler()` in `lib/nfc/nfc.c`), which powers the card out of any
+ * state it was left in.
+ */
+typedef enum {
+    SnifferCardWriteStepWrite,
+    SnifferCardWriteStepVerify,
+} SnifferCardWriteStep;
+
 struct SnifferCardPoller {
     NfcPoller* poller;
     BitBuffer* tx_buffer;
     BitBuffer* rx_buffer;
 
+    SnifferCardPollerMode mode;
     SnifferCardPollerCallback callback;
     void* context;
 
+    uint8_t uid_to_write[SNIFFER_CARD_UID_WRITE_BYTES];
+    size_t uid_to_write_len;
+    SnifferCardWriteStep write_step;
+
     SnifferCardPollerResult result;
+    SnifferCardIdentity identity;
     SnifferTrace traces[SNIFFER_CARD_TRACE_SLOTS];
     size_t trace_count;
     size_t slots_read;
 };
+
+MfClassicType sniffer_card_identity_get_type(const SnifferCardIdentity* identity) {
+    furi_assert(identity);
+
+    if(identity->sak == 0x09) return MfClassicTypeMini; // shares the 1K bit, so test it first
+    if(identity->sak & 0x10) return MfClassicType4k; // 0x18, and 0x38 for SmartMX with Classic
+    if(identity->sak & 0x08) return MfClassicType1k; // 0x08, and 0x28 for SmartMX with Classic
+
+    return MfClassicTypeNum;
+}
+
+const char* sniffer_card_identity_get_type_name(const SnifferCardIdentity* identity) {
+    switch(sniffer_card_identity_get_type(identity)) {
+    case MfClassicTypeMini:
+        return "Mini";
+    case MfClassicType1k:
+        return "1K";
+    case MfClassicType2k:
+        return "2K";
+    case MfClassicType4k:
+        return "4K";
+    default:
+        return "not Classic";
+    }
+}
 
 SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     furi_assert(nfc);
@@ -44,9 +112,13 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     instance->poller = nfc_poller_alloc(nfc, NfcProtocolIso14443_3a);
     instance->tx_buffer = bit_buffer_alloc(SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE);
     instance->rx_buffer = bit_buffer_alloc(SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE);
+    instance->mode = SnifferCardPollerModeReadIdentity;
     instance->callback = NULL;
     instance->context = NULL;
+    instance->uid_to_write_len = 0;
+    instance->write_step = SnifferCardWriteStepWrite;
     instance->result = SnifferCardPollerResultWaiting;
+    memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
     instance->slots_read = 0;
 
@@ -62,33 +134,49 @@ void sniffer_card_poller_free(SnifferCardPoller* instance) {
     free(instance);
 }
 
-/** Read one slot into @p raw.
- *
- * A short or absent answer is how the last slot of a card with fewer slots than
- * SNIFFER_CARD_TRACE_SLOTS announces itself, so the caller treats it as the end of the card
- * rather than as a failure.
- */
-static bool sniffer_card_poller_read_slot(
+void sniffer_card_poller_set_uid(SnifferCardPoller* instance, const uint8_t* uid, size_t uid_len) {
+    furi_assert(instance);
+    furi_assert(uid);
+    furi_check(uid_len <= sizeof(instance->uid_to_write));
+
+    // Zero-padded to the full seven the knock sends, so the write path never reads past what was
+    // given to it.
+    memset(instance->uid_to_write, 0, sizeof(instance->uid_to_write));
+    memcpy(instance->uid_to_write, uid, uid_len);
+    instance->uid_to_write_len = uid_len;
+}
+
+/** Send one `30 <arg>` and keep the answer. */
+static bool sniffer_card_poller_read_cmd(
     SnifferCardPoller* instance,
     Iso14443_3aPoller* iso3_poller,
-    uint8_t page,
-    uint8_t* raw) {
+    uint8_t arg) {
     bit_buffer_reset(instance->tx_buffer);
     bit_buffer_append_byte(instance->tx_buffer, SNIFFER_CARD_CMD_READ);
-    bit_buffer_append_byte(instance->tx_buffer, page);
+    bit_buffer_append_byte(instance->tx_buffer, arg);
 
     const Iso14443_3aError error = iso14443_3a_poller_send_standard_frame(
         iso3_poller, instance->tx_buffer, instance->rx_buffer, SNIFFER_CARD_POLLER_MAX_FWT);
-    if(error != Iso14443_3aErrorNone) return false;
 
-    if(bit_buffer_get_size_bytes(instance->rx_buffer) != SNIFFER_CARD_TRACE_SIZE) return false;
-
-    bit_buffer_write_bytes(instance->rx_buffer, raw, SNIFFER_CARD_TRACE_SIZE);
-
-    return true;
+    return error == Iso14443_3aErrorNone;
 }
 
-/** Work through the activated tag: decide whether it is one of these cards, and if so read it.
+/** Take the UID and SAK off the activation the poller has just done. */
+static void
+    sniffer_card_poller_take_identity(SnifferCardPoller* instance, SnifferCardIdentity* identity) {
+    const Iso14443_3aData* data = nfc_poller_get_data(instance->poller);
+
+    size_t uid_len = 0;
+    const uint8_t* uid = iso14443_3a_get_uid(data, &uid_len);
+
+    furi_check(uid_len <= sizeof(identity->uid));
+    memset(identity, 0, sizeof(*identity));
+    memcpy(identity->uid, uid, uid_len);
+    identity->uid_len = uid_len;
+    identity->sak = iso14443_3a_get_sak(data);
+}
+
+/** Read every trace slot the card will give up.
  *
  * Only the commands the vendor's own app sends on its read path are used. Its UID-write path
  * opens with `30 F3`, whose answer is a better identity signature than anything here - but that
@@ -97,20 +185,21 @@ static bool sniffer_card_poller_read_slot(
  * the card, so the signature is not worth it.
  */
 static SnifferCardPollerResult
-    sniffer_card_poller_read(SnifferCardPoller* instance, Iso14443_3aPoller* iso3_poller) {
-    const Iso14443_3aData* data = nfc_poller_get_data(instance->poller);
-    if(iso14443_3a_get_sak(data) == SNIFFER_CARD_SAK_NOT_CLASSIC) {
+    sniffer_card_poller_read_traces(SnifferCardPoller* instance, Iso14443_3aPoller* iso3_poller) {
+    if(instance->identity.sak == SNIFFER_CARD_SAK_NOT_CLASSIC) {
         FURI_LOG_D(TAG, "Not a Classic-emulating tag");
-        return SnifferCardPollerResultNotSniffer;
+        return SnifferCardPollerResultWrongCard;
     }
 
     instance->trace_count = 0;
     instance->slots_read = 0;
 
     for(uint8_t page = 0; page < SNIFFER_CARD_TRACE_SLOTS; page++) {
-        uint8_t raw[SNIFFER_CARD_TRACE_SIZE];
-        if(!sniffer_card_poller_read_slot(instance, iso3_poller, page, raw)) break;
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, page)) break;
+        if(bit_buffer_get_size_bytes(instance->rx_buffer) != SNIFFER_CARD_TRACE_SIZE) break;
 
+        uint8_t raw[SNIFFER_CARD_TRACE_SIZE];
+        bit_buffer_write_bytes(instance->rx_buffer, raw, sizeof(raw));
         instance->slots_read++;
 
         SnifferTrace trace;
@@ -123,10 +212,62 @@ static SnifferCardPollerResult
     // ordinary outcome for an ordinary card and not an error worth reporting as one.
     if(instance->slots_read == 0) {
         FURI_LOG_D(TAG, "No slot answered");
-        return SnifferCardPollerResultNotSniffer;
+        return SnifferCardPollerResultWrongCard;
     }
 
     FURI_LOG_I(TAG, "%zu slots read, %zu captures", instance->slots_read, instance->trace_count);
+
+    return SnifferCardPollerResultSuccess;
+}
+
+/** Knock, then write the UID a byte per command. */
+static SnifferCardPollerResult
+    sniffer_card_poller_write_uid(SnifferCardPoller* instance, Iso14443_3aPoller* iso3_poller) {
+    if(instance->identity.sak == SNIFFER_CARD_SAK_NOT_CLASSIC) {
+        FURI_LOG_D(TAG, "Not a Classic-emulating tag");
+        return SnifferCardPollerResultWrongCard;
+    }
+
+    // The vendor app refuses this too, and for a physical reason: the card is a 4-byte or a
+    // 7-byte part. Writing a 7-byte UID into a 4-byte card has nowhere to put the other three
+    // bytes, and the reader the card is meant to fool would see a UID of the wrong length.
+    if(instance->identity.uid_len != instance->uid_to_write_len) {
+        FURI_LOG_W(
+            TAG,
+            "Card UID is %zu bytes, asked to write %zu",
+            instance->identity.uid_len,
+            instance->uid_to_write_len);
+        return SnifferCardPollerResultUidLenMismatch;
+    }
+
+    for(size_t i = 0; i < COUNT_OF(sniffer_card_uid_knock); i++) {
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i])) {
+            FURI_LOG_E(TAG, "Knock step %zu failed", i);
+            return SnifferCardPollerResultError;
+        }
+    }
+
+    for(size_t i = 0; i < SNIFFER_CARD_UID_WRITE_BYTES; i++) {
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i])) {
+            FURI_LOG_E(TAG, "UID byte %zu failed", i);
+            return SnifferCardPollerResultError;
+        }
+    }
+
+    return SnifferCardPollerResultSuccess;
+}
+
+/** Compare what the card answers as now against what it was told to be. */
+static SnifferCardPollerResult sniffer_card_poller_verify_uid(SnifferCardPoller* instance) {
+    SnifferCardIdentity after;
+    sniffer_card_poller_take_identity(instance, &after);
+    instance->identity = after;
+
+    if(after.uid_len != instance->uid_to_write_len ||
+       memcmp(after.uid, instance->uid_to_write, after.uid_len) != 0) {
+        FURI_LOG_E(TAG, "UID write did not take");
+        return SnifferCardPollerResultWriteMismatch;
+    }
 
     return SnifferCardPollerResultSuccess;
 }
@@ -141,12 +282,51 @@ static NfcCommand sniffer_card_poller_nfc_callback(NfcGenericEvent event, void* 
     Iso14443_3aPoller* iso3_poller = event.instance;
     const Iso14443_3aPollerEvent* iso3_event = event.event_data;
 
-    // Anything other than a tag standing activated in the field means keep waiting: the scene
-    // that started this session is showing "place the card", and an empty field is that screen's
-    // normal state rather than something to report.
-    if(iso3_event->type != Iso14443_3aPollerEventTypeReady) return NfcCommandContinue;
+    if(iso3_event->type != Iso14443_3aPollerEventTypeReady) {
+        // The read-back is the one place where a tag failing to activate is a verdict rather
+        // than something to keep waiting through: the card was there a moment ago, and if it is
+        // not there now then nothing can confirm what the write did.
+        if(instance->mode == SnifferCardPollerModeWriteUid &&
+           instance->write_step == SnifferCardWriteStepVerify) {
+            instance->result = SnifferCardPollerResultWriteUnverified;
+            instance->callback(instance->context);
+            return NfcCommandStop;
+        }
 
-    instance->result = sniffer_card_poller_read(instance, iso3_poller);
+        // Otherwise an empty field is the normal state of the screen that started this session,
+        // which is asking for a card to be presented.
+        return NfcCommandContinue;
+    }
+
+    if(instance->mode == SnifferCardPollerModeWriteUid &&
+       instance->write_step == SnifferCardWriteStepVerify) {
+        instance->result = sniffer_card_poller_verify_uid(instance);
+        instance->callback(instance->context);
+        return NfcCommandStop;
+    }
+
+    sniffer_card_poller_take_identity(instance, &instance->identity);
+
+    switch(instance->mode) {
+    case SnifferCardPollerModeReadIdentity:
+        instance->result = SnifferCardPollerResultSuccess;
+        break;
+
+    case SnifferCardPollerModeReadTraces:
+        instance->result = sniffer_card_poller_read_traces(instance, iso3_poller);
+        break;
+
+    case SnifferCardPollerModeWriteUid:
+        instance->result = sniffer_card_poller_write_uid(instance, iso3_poller);
+        if(instance->result == SnifferCardPollerResultSuccess) {
+            // Not a result yet: cycle the field so the card is powered down and selected again,
+            // and judge the write on what it answers as then.
+            instance->write_step = SnifferCardWriteStepVerify;
+            return NfcCommandReset;
+        }
+        break;
+    }
+
     instance->callback(instance->context);
 
     return NfcCommandStop;
@@ -154,14 +334,18 @@ static NfcCommand sniffer_card_poller_nfc_callback(NfcGenericEvent event, void* 
 
 void sniffer_card_poller_start(
     SnifferCardPoller* instance,
+    SnifferCardPollerMode mode,
     SnifferCardPollerCallback callback,
     void* context) {
     furi_assert(instance);
     furi_assert(callback);
 
+    instance->mode = mode;
     instance->callback = callback;
     instance->context = context;
+    instance->write_step = SnifferCardWriteStepWrite;
     instance->result = SnifferCardPollerResultWaiting;
+    memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
     instance->slots_read = 0;
 
@@ -178,6 +362,12 @@ SnifferCardPollerResult sniffer_card_poller_get_result(const SnifferCardPoller* 
     furi_assert(instance);
 
     return instance->result;
+}
+
+const SnifferCardIdentity* sniffer_card_poller_get_identity(const SnifferCardPoller* instance) {
+    furi_assert(instance);
+
+    return &instance->identity;
 }
 
 size_t
