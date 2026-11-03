@@ -1,0 +1,5 @@
+ADD_SCENE(sniffer_card_app, start, Start)
+ADD_SCENE(sniffer_card_app, read, Read)
+ADD_SCENE(sniffer_card_app, read_result, ReadResult)
+ADD_SCENE(sniffer_card_app, saved, Saved)
+ADD_SCENE(sniffer_card_app, info, Info)
