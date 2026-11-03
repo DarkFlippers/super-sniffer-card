@@ -61,6 +61,19 @@ typedef enum {
 } SnifferCardWriteStep;
 
 struct SnifferCardPoller {
+    Nfc* nfc;
+    /** Allocated per session and freed with it, because an NfcPoller is single-use.
+     *
+     * `nfc_poller_alloc()` is what calls `nfc_config()` on the way down
+     * (`iso14443_3a_poller_alloc()` in `lib/nfc/protocols/iso14443_3a/iso14443_3a_poller.c`), and
+     * a session that ends puts the configuration state back to Idle
+     * (`nfc_worker_poller_stop_handler()`). `nfc_start()` hard-checks that state, so starting a
+     * second session on one poller is a furi_check failure, not a quiet misbehaviour - it takes
+     * the whole app down.
+     *
+     * NULL between sessions, which is also what makes stopping twice harmless: every scene stops
+     * in its on_exit whether or not its session is still running.
+     */
     NfcPoller* poller;
     BitBuffer* tx_buffer;
     BitBuffer* rx_buffer;
@@ -109,7 +122,8 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     furi_assert(nfc);
 
     SnifferCardPoller* instance = malloc(sizeof(SnifferCardPoller));
-    instance->poller = nfc_poller_alloc(nfc, NfcProtocolIso14443_3a);
+    instance->nfc = nfc;
+    instance->poller = NULL;
     instance->tx_buffer = bit_buffer_alloc(SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE);
     instance->rx_buffer = bit_buffer_alloc(SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE);
     instance->mode = SnifferCardPollerModeReadIdentity;
@@ -128,7 +142,9 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
 void sniffer_card_poller_free(SnifferCardPoller* instance) {
     furi_assert(instance);
 
-    nfc_poller_free(instance->poller);
+    // Normally already stopped by the scene's on_exit, which Back always runs. Guarded rather
+    // than trusted, because leaving a session running past its owner is how the radio stays on.
+    sniffer_card_poller_stop(instance);
     bit_buffer_free(instance->tx_buffer);
     bit_buffer_free(instance->rx_buffer);
     free(instance);
@@ -349,13 +365,25 @@ void sniffer_card_poller_start(
     instance->trace_count = 0;
     instance->slots_read = 0;
 
+    // A fresh poller for a fresh session; see SnifferCardPoller::poller for why it cannot be
+    // allocated once and kept.
+    furi_check(instance->poller == NULL);
+    instance->poller = nfc_poller_alloc(instance->nfc, NfcProtocolIso14443_3a);
+
     nfc_poller_start(instance->poller, sniffer_card_poller_nfc_callback, instance);
 }
 
 void sniffer_card_poller_stop(SnifferCardPoller* instance) {
     furi_assert(instance);
 
+    if(instance->poller == NULL) return;
+
+    // Stopping is needed even when the session ended itself: the callback returning
+    // NfcCommandStop ends the worker loop, but only nfc_stop() joins its thread and takes the
+    // Nfc instance out of its running state.
     nfc_poller_stop(instance->poller);
+    nfc_poller_free(instance->poller);
+    instance->poller = NULL;
 }
 
 SnifferCardPollerResult sniffer_card_poller_get_result(const SnifferCardPoller* instance) {
