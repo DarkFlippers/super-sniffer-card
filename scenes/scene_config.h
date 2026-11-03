@@ -1,6 +1,8 @@
 ADD_SCENE(sniffer_card_app, start, Start)
 ADD_SCENE(sniffer_card_app, read_original, ReadOriginal)
 ADD_SCENE(sniffer_card_app, confirm_uid, ConfirmUid)
+ADD_SCENE(sniffer_card_app, uid_length, UidLength)
+ADD_SCENE(sniffer_card_app, enter_uid, EnterUid)
 ADD_SCENE(sniffer_card_app, write_uid, WriteUid)
 ADD_SCENE(sniffer_card_app, write_result, WriteResult)
 ADD_SCENE(sniffer_card_app, read, Read)

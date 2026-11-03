@@ -76,7 +76,7 @@ void sniffer_card_app_scene_write_result_on_enter(void* context) {
         widget_add_string_multiline_element(
             app->widget,
             64,
-            17,
+            SNIFFER_CARD_TEXT_Y,
             AlignCenter,
             AlignTop,
             FontSecondary,
@@ -86,11 +86,13 @@ void sniffer_card_app_scene_write_result_on_enter(void* context) {
         // it rather than echoed from what was asked for.
         const SnifferCardIdentity* identity = sniffer_card_poller_get_identity(app->poller);
         sniffer_card_app_uid_text(identity->uid, identity->uid_len, app->text);
-        furi_string_cat_str(app->text, "\n\nThe sniffer card now\nanswers as the original");
+        // Three lines total, no blank one: a fourth would start below SNIFFER_CARD_BUTTON_ROW_Y
+        // and be painted over by the buttons.
+        furi_string_cat_str(app->text, "\nThe sniffer card now\nanswers as the original");
         widget_add_string_multiline_element(
             app->widget,
             64,
-            17,
+            SNIFFER_CARD_TEXT_Y,
             AlignCenter,
             AlignTop,
             FontSecondary,

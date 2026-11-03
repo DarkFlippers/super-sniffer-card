@@ -27,12 +27,15 @@ void sniffer_card_app_scene_confirm_uid_on_enter(void* context) {
         sniffer_card_identity_get_type_name(&app->target),
         app->target.uid_len);
 
+    // A third body line and no blank one: SNIFFER_CARD_TEXT_LINES is what fits above the buttons,
+    // and the blank line this used to carry pushed the advice under them, where it was drawn and
+    // then painted over.
     if(is_classic) {
         // The UID length is named because it decides which sniffer card can be used at all: these
         // cards are a 4-byte or a 7-byte part, and the write refuses the other.
-        furi_string_cat_printf(app->text, "\n\nUse a %u-byte sniffer card", app->target.uid_len);
+        furi_string_cat_printf(app->text, "\nUse a %u-byte sniffer card", app->target.uid_len);
     } else {
-        furi_string_cat_str(app->text, "\n\nSniffing only works on\nMIFARE Classic");
+        furi_string_cat_str(app->text, "\nSniffing needs a Classic");
     }
 
     widget_reset(app->widget);
@@ -45,7 +48,13 @@ void sniffer_card_app_scene_confirm_uid_on_enter(void* context) {
         FontPrimary,
         is_classic ? "Original card" : "Wrong card type");
     widget_add_string_multiline_element(
-        app->widget, 64, 15, AlignCenter, AlignTop, FontSecondary, furi_string_get_cstr(app->text));
+        app->widget,
+        64,
+        SNIFFER_CARD_TEXT_Y,
+        AlignCenter,
+        AlignTop,
+        FontSecondary,
+        furi_string_get_cstr(app->text));
 
     widget_add_button_element(
         app->widget,

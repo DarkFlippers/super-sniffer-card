@@ -24,7 +24,9 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
     } else if(saved) {
         furi_string_printf(
             app->text,
-            "%u nonce pair%s added to\nthe MFKey nonce log.\n\nOpen MFKey to recover\nthe keys.",
+            // Four lines, which is what fits on a screen with no button row; a fifth runs off the
+            // bottom.
+            "%u nonce pair%s added\nto the MFKey nonce log.\n\nOpen MFKey to recover.",
             result.pairs_written,
             result.pairs_written == 1 ? "" : "s");
 
@@ -39,7 +41,13 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
     }
 
     widget_add_string_multiline_element(
-        app->widget, 64, 18, AlignCenter, AlignTop, FontSecondary, furi_string_get_cstr(app->text));
+        app->widget,
+        64,
+        SNIFFER_CARD_TEXT_Y,
+        AlignCenter,
+        AlignTop,
+        FontSecondary,
+        furi_string_get_cstr(app->text));
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewWidget);
 }

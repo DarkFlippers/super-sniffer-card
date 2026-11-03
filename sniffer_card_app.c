@@ -52,6 +52,10 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
         app->view_dispatcher, sniffer_card_app_back_event_callback);
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
 
+    app->byte_input = byte_input_alloc();
+    view_dispatcher_add_view(
+        app->view_dispatcher, SnifferCardAppViewByteInput, byte_input_get_view(app->byte_input));
+
     app->popup = popup_alloc();
     view_dispatcher_add_view(
         app->view_dispatcher, SnifferCardAppViewPopup, popup_get_view(app->popup));
@@ -71,6 +75,8 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
     app->trace_count = 0;
     app->slots_read = 0;
     memset(&app->target, 0, sizeof(app->target));
+    memset(app->uid_input, 0, sizeof(app->uid_input));
+    app->uid_input_len = 0;
     app->text = furi_string_alloc();
 
     return app;
@@ -80,10 +86,12 @@ static void sniffer_card_app_free(SnifferCardApp* app) {
     sniffer_card_poller_free(app->poller);
     nfc_free(app->nfc);
 
+    view_dispatcher_remove_view(app->view_dispatcher, SnifferCardAppViewByteInput);
     view_dispatcher_remove_view(app->view_dispatcher, SnifferCardAppViewPopup);
     view_dispatcher_remove_view(app->view_dispatcher, SnifferCardAppViewSubmenu);
     view_dispatcher_remove_view(app->view_dispatcher, SnifferCardAppViewWidget);
 
+    byte_input_free(app->byte_input);
     popup_free(app->popup);
     submenu_free(app->submenu);
     widget_free(app->widget);
