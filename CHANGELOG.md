@@ -2,14 +2,16 @@
 
 ## 0.2
 
-- Add the guided run: read the card you want keys for, set the sniffer card's UID to match, go to the reader, come back and read the captures, save them. Each step is also reachable on its own from the menu, for when only one of them is wanted
 - Set a Gen2 sniffer card's UID, which Proxmark3 cannot - `hf mf supercard` answers "Not supported on this card" for Gen2. The sequence came out of the vendor app: five READ commands that mean nothing as reads (`30 F3`, `30 2A`, `30 BD`, `30 EF`, `30 01`), then one command per UID byte
 - Send seven UID bytes whatever the UID's length, zero-padding a 4-byte one, which turns the last three commands into a read of page 0. Mirrored from the vendor app rather than shortened to four: seven is what is known to work on real cards and four is a guess
 - Read the UID back off the card before calling a write a success, by cycling the field rather than halting the card. A HLTA would leave it answering only WUPA, and the firmware activates with REQA alone, so a halted card would never come back and every write would read as unconfirmed; returning `NfcCommandReset` takes the field down for 100 ms and brings it up, which powers the card out of whatever state the write left it in
-- Separate "the card came back as something else" from "the card did not come back", because only the first is a failed write. A card lifted off the Flipper too early looks like the second, and the run can carry on from there - reading it is how the user finds out either way
+- Separate "the card came back as something else" from "the card did not come back", because only the first is a failed write. A card lifted off the Flipper too early looks like the second, and the job can be carried on from there - reading the card is how the user finds out either way
 - Refuse a UID of a different length from the sniffer card's own, as the vendor app does. These cards are physically a 4-byte or a 7-byte part, and a UID of the wrong length has nowhere to go
+- Keep setting the UID and reading the captures as two separate menu entries rather than one guided run. Between them the card goes to a reader, which is minutes away from the Flipper with the app closed, so a wizard spanning that would have "leave" as its middle step and nothing to resume from. Either half can also be repeated without the other - one UID, many readers
 - Name the original card's UID length and size on screen, since that is what decides which of the four sniffer card variants will take it
 - Size the original card from its SAK by testing bits rather than whole values, per AN10833 and the firmware's own detection, with Mini matched before 1K because it shares the 1K bit
+- Skip a pair when the log already holds one for the same card, sector and key type. These cards keep their captures until a reader overwrites them, so reading one twice would otherwise append the same work again - and MFKey does not deduplicate: its loader runs the full attack per line, and only checks the dictionaries for keys already found. One pair recovers a key, so the second is minutes spent on an answer already queued
+- Count the skipped pairs on screen instead of quietly dropping them, so a second read of an already-saved card says "nothing new to add" rather than looking like a card that captured nothing
 
 ## 0.1
 
@@ -21,4 +23,4 @@
 - Skip a pair whose two captures share a tag nonce. They carry the same keystream position, so mfkey32 has nothing to intersect - the line would cost MFKey its minutes and could not succeed
 - Append to `/ext/nfc/.mfkey32.log` in the firmware's own line format, byte for byte, so nonces sniffed off a reader with the Flipper and nonces lifted off a sniffer card accumulate in the same place. The format matters exactly: MFKey does not parse this with a format string, it walks space-separated tokens and keeps the 5th, 7th, 9th, 11th, 13th, 15th and 17th
 - Identify the card passively. It is recognised by answering an unauthenticated `30 00` while presenting a MIFARE Classic SAK - a genuine Classic refuses that read, and a plain Ultralight answers it but cannot present that SAK. The vendor app has a stronger signature, `30 F3` answering with `0x11`, but that byte is also the first step of the five-command sequence that arms a UID write, and nothing establishes what a card does with an unfinished knock. A read must not be able to change the card
-- Say what a read found, per capture, with the sector, the key type and the block the reader asked for, and count separately the captures that have no second authentication of the same key - that is the one failure another tap on the reader fixes
+- Say what a read found, per capture, with the sector, the key type and the block the reader asked for, and count separately the captures that have no second authentication of the same key - that is the one shortfall another tap on the reader fixes

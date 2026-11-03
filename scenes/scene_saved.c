@@ -8,7 +8,20 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
 
     widget_reset(app->widget);
 
-    if(saved) {
+    if(saved && result.pairs_written == 0) {
+        // Everything this card holds is already waiting for MFKey. Said plainly, because these
+        // cards keep their captures until a reader overwrites them, so reading one twice is easy
+        // to do by accident and would otherwise look like a failure.
+        furi_string_printf(
+            app->text,
+            "%u pair%s already in\nthe MFKey nonce log.\n\nNothing new to add.",
+            result.pairs_duplicate,
+            result.pairs_duplicate == 1 ? "" : "s");
+
+        widget_add_string_element(
+            app->widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Already saved");
+        notification_message(app->notifications, &sequence_success);
+    } else if(saved) {
         furi_string_printf(
             app->text,
             "%u nonce pair%s added to\nthe MFKey nonce log.\n\nOpen MFKey to recover\nthe keys.",

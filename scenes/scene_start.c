@@ -1,17 +1,18 @@
 #include "../sniffer_card_app.h"
 
-// Label, destination and whether it starts the guided run, in one row: the menu used to be a
-// list of submenu_add_item() calls dispatched by an if/else chain, where reordering it opened the
-// wrong scene and nothing complained.
+// Label and destination in one row, so a reordered menu cannot quietly open the wrong scene.
+//
+// Two jobs rather than one guided run, and in the order they are first done. The run cannot be
+// guided: between setting the UID and reading the captures the card goes to a reader, which is
+// minutes away from the Flipper with the app closed, so a wizard spanning that is a wizard whose
+// middle step is "leave". Each half stands alone and either can be repeated without the other.
 static const struct {
     const char* label;
     SnifferCardAppScene scene;
-    bool guided;
 } sniffer_card_start_items[] = {
-    {"Recover Keys", SnifferCardAppSceneReadOriginal, true},
-    {"Read Sniffer Card", SnifferCardAppSceneRead, false},
-    {"Set Sniffer UID", SnifferCardAppSceneReadOriginal, false},
-    {"About", SnifferCardAppSceneInfo, false},
+    {"Set Sniffer UID", SnifferCardAppSceneReadOriginal},
+    {"Read Sniffer Card", SnifferCardAppSceneRead},
+    {"About", SnifferCardAppSceneInfo},
 };
 
 static void sniffer_card_app_scene_start_callback(void* context, uint32_t index) {
@@ -47,11 +48,6 @@ bool sniffer_card_app_scene_start_on_event(void* context, SceneManagerEvent even
     if(event.event >= COUNT_OF(sniffer_card_start_items)) return false;
 
     scene_manager_set_scene_state(app->scene_manager, SnifferCardAppSceneStart, event.event);
-
-    // Set here and nowhere else: this is the only screen both runs are entered from, so it is the
-    // only place that knows which one was asked for.
-    app->guided = sniffer_card_start_items[event.event].guided;
-
     scene_manager_next_scene(app->scene_manager, sniffer_card_start_items[event.event].scene);
 
     return true;

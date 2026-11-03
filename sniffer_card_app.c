@@ -71,7 +71,6 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
     app->trace_count = 0;
     app->slots_read = 0;
     memset(&app->target, 0, sizeof(app->target));
-    app->guided = false;
     app->text = furi_string_alloc();
 
     return app;

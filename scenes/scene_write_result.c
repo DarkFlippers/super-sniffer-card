@@ -108,7 +108,7 @@ void sniffer_card_app_scene_write_result_on_enter(void* context) {
         widget_add_button_element(
             app->widget,
             GuiButtonTypeRight,
-            app->guided ? "Next" : "Done",
+            "Done",
             sniffer_card_app_scene_write_result_button_callback,
             app);
     }
@@ -133,14 +133,10 @@ bool sniffer_card_app_scene_write_result_on_event(void* context, SceneManagerEve
     }
 
     if(event.event == SnifferCardAppCustomEventNext) {
-        // Setting the UID on its own ends here. In the guided run it is the halfway point, and
-        // what follows happens away from the Flipper.
-        if(app->guided) {
-            scene_manager_next_scene(app->scene_manager, SnifferCardAppSceneSniffHint);
-        } else {
-            scene_manager_search_and_switch_to_previous_scene(
-                app->scene_manager, SnifferCardAppSceneStart);
-        }
+        // The card's next stop is a reader, which is nothing this app can take part in, so the
+        // job ends at the menu rather than leading anywhere.
+        scene_manager_search_and_switch_to_previous_scene(
+            app->scene_manager, SnifferCardAppSceneStart);
         return true;
     }
 

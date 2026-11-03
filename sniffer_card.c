@@ -38,6 +38,12 @@ bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out) {
     return true;
 }
 
+uint32_t sniffer_trace_get_cuid(const SnifferTrace* trace) {
+    furi_assert(trace);
+
+    return sniffer_card_be32(trace->cuid);
+}
+
 uint8_t sniffer_trace_get_sector(const SnifferTrace* trace) {
     furi_assert(trace);
     // Handles the 4K geometry, where the last eight sectors hold sixteen blocks rather than four.

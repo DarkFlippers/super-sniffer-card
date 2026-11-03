@@ -61,6 +61,9 @@ typedef struct {
  */
 bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out);
 
+/** The capture's UID as the one number the nonce log carries it as. */
+uint32_t sniffer_trace_get_cuid(const SnifferTrace* trace);
+
 /** Sector a trace's block belongs to. */
 uint8_t sniffer_trace_get_sector(const SnifferTrace* trace);
 

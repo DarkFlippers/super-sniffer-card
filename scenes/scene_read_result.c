@@ -27,14 +27,24 @@ static void sniffer_card_app_scene_read_result_build_text(SnifferCardApp* app) {
 
     furi_string_printf(
         app->text,
-        "%u capture%s, %u pair%s\n",
+        "%u capture%s, %u new pair%s\n",
         app->trace_count,
         app->trace_count == 1 ? "" : "s",
         pairs.pairs_written,
         pairs.pairs_written == 1 ? "" : "s");
 
+    if(pairs.pairs_duplicate > 0) {
+        // Named rather than folded into the pair count, so a second read of a card already saved
+        // reads as "nothing new" instead of as a card that captured nothing.
+        furi_string_cat_printf(
+            app->text,
+            "%u pair%s already in the log\n",
+            pairs.pairs_duplicate,
+            pairs.pairs_duplicate == 1 ? "" : "s");
+    }
+
     if(pairs.traces_unpaired > 0) {
-        // Worth naming, because it is the one failure the user can fix by doing the same thing
+        // Worth naming, because it is the one shortfall the user can fix by doing the same thing
         // again: another tap on the reader turns an unpaired capture into a pair.
         furi_string_cat_printf(
             app->text,

@@ -50,11 +50,6 @@ typedef struct {
     // card is to be given.
     SnifferCardIdentity target;
 
-    // Whether the UID write is a step of the guided run or an errand of its own. The two share
-    // every screen up to the write and differ only in where they go after it, which is not
-    // something the scene stack can answer: both were reached from the menu.
-    bool guided;
-
     // Text built once on entering a screen and held while that screen draws it: Widget keeps the
     // pointer it is given rather than copying the string.
     FuriString* text;

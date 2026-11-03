@@ -16,22 +16,31 @@ do the arithmetic.
 
 ## How to use it
 
-Pick **Recover Keys** and the app walks the whole thing:
+Two menu entries, not one wizard - the card spends the middle of the job on a reader, away from
+the Flipper, so there is nothing to walk through in between. One UID, many readers.
+
+**Set Sniffer UID**
 
 1. Hold the card you want keys for against the Flipper. The app reads its UID and size, and names
    the UID length so you know which sniffer card will take it.
 2. Hold the **sniffer** card against the Flipper. Its UID is set to the original's, then read back
    off the card to confirm it took.
-3. Take the sniffer card to the reader and hold it there at least twice. Each tap records one
-   authentication, and recovering a key needs two of the same sector.
-4. Come back, press **Read**, hold the sniffer card against the Flipper. The app lists what it
-   captured.
-5. Press **Save**. The pairs are appended to `/ext/nfc/.mfkey32.log`.
-6. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
+
+Then take the sniffer card to the reader and hold it there at least twice. Each tap records one
+authentication, and recovering a key needs two of the same sector. Come back whenever.
+
+**Read Sniffer Card**
+
+3. Hold the sniffer card against the Flipper. The app lists what it captured, and says how much of
+   it is new.
+4. Press **Save**. The new pairs are appended to `/ext/nfc/.mfkey32.log`.
+5. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
    Flipper's NFC app can then read the original card.
 
-**Read Sniffer Card** and **Set Sniffer UID** do steps 4-5 and steps 1-2 on their own, for when
-only one of them is wanted.
+Reading the same card twice is safe: the card keeps its captures until a reader overwrites them,
+and a pair whose key the log already covers is skipped rather than appended again. The screen says
+how many were skipped, so a card with nothing new on it reads as "nothing new to add" rather than
+as a card that captured nothing.
 
 ## Why MFKey does the recovery
 
