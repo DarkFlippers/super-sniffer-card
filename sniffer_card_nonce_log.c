@@ -19,67 +19,72 @@
     "Sec %u key %c cuid %08" PRIx32 " nt0 %08" PRIx32 " nr0 %08" PRIx32 " ar0 %08" PRIx32 \
     " nt1 %08" PRIx32 " nr1 %08" PRIx32 " ar1 %08" PRIx32 "\n"
 
-/** The head of a log line, enough to say which key it is a pair for.
+/** The same line read back, for telling a pair already in the log from a new one.
  *
- * SCNx32 rather than PRIx32: the same letter on this target, but this one is read back with
- * sscanf and the two macros are not interchangeable by contract.
+ * SCNx32 rather than PRIx32: the same letter on this target, but these are read with sscanf and
+ * the two macros are not interchangeable by contract.
  */
-#define SNIFFER_CARD_NONCE_LOG_HEAD_FORMAT "Sec %u key %c cuid %8" SCNx32
+#define SNIFFER_CARD_NONCE_LOG_SCAN_FORMAT                                            \
+    "Sec %u key %c cuid %8" SCNx32 " nt0 %8" SCNx32 " nr0 %8" SCNx32 " ar0 %8" SCNx32 \
+    " nt1 %8" SCNx32 " nr1 %8" SCNx32 " ar1 %8" SCNx32
 
-/** Which key a pair belongs to.
+/** Conversions SNIFFER_CARD_NONCE_LOG_SCAN_FORMAT performs when a line is a nonce pair. */
+#define SNIFFER_CARD_NONCE_LOG_SCAN_FIELDS 9
+
+/** The six words of one authentication pair, plus the card they belong to.
  *
- * The card is part of it: one nonce log accumulates pairs from every card ever read, so a pair
- * for sector 5 key A of one card says nothing about sector 5 key A of another.
+ * What makes two lines the same line. The sector and key type are deliberately not part of it:
+ * several pairs of one sector and key type are expected now, and comparing on those would throw
+ * away every combination after the first.
  */
 typedef struct {
     uint32_t cuid;
-    uint8_t sector;
-    uint8_t key_type;
-} SnifferCardKeyRef;
+    uint32_t nt0, nr0, ar0;
+    uint32_t nt1, nr1, ar1;
+} SnifferCardPairRef;
 
-/** A pair of captures, and whether the log already has this key covered. */
+/** A pair of captures and whether the log already holds it. */
 typedef struct {
     const SnifferTrace* a;
     const SnifferTrace* b;
-    SnifferCardKeyRef key;
+    uint8_t sector;
+    uint8_t key_type;
     bool duplicate;
 } SnifferCardNoncePair;
 
-static SnifferCardKeyRef sniffer_card_key_ref(const SnifferTrace* trace) {
-    return (SnifferCardKeyRef){
-        .cuid = sniffer_trace_get_cuid(trace),
-        .sector = sniffer_trace_get_sector(trace),
-        .key_type = trace->key_type,
+static SnifferCardPairRef sniffer_card_pair_ref(const SnifferTrace* a, const SnifferTrace* b) {
+    return (SnifferCardPairRef){
+        .cuid = sniffer_trace_get_cuid(a),
+        .nt0 = a->nt,
+        .nr0 = a->nr,
+        .ar0 = a->ar,
+        .nt1 = b->nt,
+        .nr1 = b->nr,
+        .ar1 = b->ar,
     };
 }
 
-static bool sniffer_card_key_ref_eq(const SnifferCardKeyRef* a, const SnifferCardKeyRef* b) {
-    return a->cuid == b->cuid && a->sector == b->sector && a->key_type == b->key_type;
-}
-
-/** Find a capture that can be paired with @p first.
+/** Whether two pair references describe the same two authentications.
  *
- * Only looks forward: anything before @p first has already had its turn as the left-hand side.
- *
- * Nonces have to differ. Two captures of one key sharing a tag nonce carry the same keystream
- * position, so mfkey32 has nothing to intersect and returns no candidate - it would be a line
- * that costs MFKey minutes and cannot succeed.
+ * Either way round. Nothing this app writes swaps them, but a pair that arrived from somewhere
+ * else with its halves the other way about is still the same work for MFKey.
  */
-static size_t sniffer_card_nonce_log_find_partner(
-    const SnifferTrace* traces,
-    size_t count,
-    const bool* used,
-    size_t first) {
-    for(size_t i = first + 1; i < count; i++) {
-        if(used[i]) continue;
-        if(!sniffer_trace_same_key(&traces[first], &traces[i])) continue;
-        if(traces[first].nt == traces[i].nt) continue;
-        return i;
-    }
-    return count;
+static bool sniffer_card_pair_ref_eq(const SnifferCardPairRef* x, const SnifferCardPairRef* y) {
+    if(x->cuid != y->cuid) return false;
+
+    const bool same_order = x->nt0 == y->nt0 && x->nr0 == y->nr0 && x->ar0 == y->ar0 &&
+                            x->nt1 == y->nt1 && x->nr1 == y->nr1 && x->ar1 == y->ar1;
+    const bool swapped = x->nt0 == y->nt1 && x->nr0 == y->nr1 && x->ar0 == y->ar1 &&
+                         x->nt1 == y->nt0 && x->nr1 == y->nr0 && x->ar1 == y->ar0;
+
+    return same_order || swapped;
 }
 
-/** Pair up the captures, and count the ones left over.
+/** Build every pair of captures that could share a key, and count the captures that cannot.
+ *
+ * Two captures qualify when they are of one sector and key type and their tag nonces differ. A
+ * shared nonce means a shared keystream position, so mfkey32 would have nothing to intersect -
+ * minutes spent on a line that cannot succeed.
  *
  * @param[out] pairs room for SNIFFER_CARD_MAX_PAIRS
  * @return how many pairs were made
@@ -91,40 +96,41 @@ static size_t sniffer_card_nonce_log_collect(
     size_t* unpaired) {
     furi_check(count <= SNIFFER_CARD_TRACE_SLOTS);
 
-    bool used[SNIFFER_CARD_TRACE_SLOTS] = {0};
+    bool in_pair[SNIFFER_CARD_TRACE_SLOTS] = {0};
     size_t pair_count = 0;
 
-    *unpaired = 0;
-
     for(size_t i = 0; i < count; i++) {
-        if(used[i]) continue;
+        for(size_t j = i + 1; j < count; j++) {
+            if(!sniffer_trace_same_key(&traces[i], &traces[j])) continue;
+            if(traces[i].nt == traces[j].nt) continue;
 
-        const size_t j = sniffer_card_nonce_log_find_partner(traces, count, used, i);
-        if(j == count) {
-            (*unpaired)++;
-            continue;
+            furi_check(pair_count < SNIFFER_CARD_MAX_PAIRS);
+            pairs[pair_count++] = (SnifferCardNoncePair){
+                .a = &traces[i],
+                .b = &traces[j],
+                .sector = sniffer_trace_get_sector(&traces[i]),
+                .key_type = traces[i].key_type,
+                .duplicate = false,
+            };
+
+            in_pair[i] = true;
+            in_pair[j] = true;
         }
+    }
 
-        used[i] = true;
-        used[j] = true;
-
-        furi_check(pair_count < SNIFFER_CARD_MAX_PAIRS);
-        pairs[pair_count++] = (SnifferCardNoncePair){
-            .a = &traces[i],
-            .b = &traces[j],
-            .key = sniffer_card_key_ref(&traces[i]),
-            .duplicate = false,
-        };
+    *unpaired = 0;
+    for(size_t i = 0; i < count; i++) {
+        if(!in_pair[i]) (*unpaired)++;
     }
 
     return pair_count;
 }
 
-/** Mark the pairs whose key the log already holds a pair for.
+/** Mark the pairs the log already holds.
  *
  * Reads the log once and compares against every candidate, rather than building a set of what is
- * in the file: there are at most SNIFFER_CARD_MAX_PAIRS candidates and the file can be long, so
- * the small side is the one worth holding in memory.
+ * in the file: the candidates are bounded and the file is not, so the small side is the one worth
+ * holding in memory.
  *
  * A log that cannot be read is treated as a log with nothing in it. Writing a duplicate costs
  * MFKey time; refusing to write because the file could not be examined would cost the user their
@@ -144,25 +150,28 @@ static void sniffer_card_nonce_log_mark_duplicates(
         while(stream_read_line(stream, line)) {
             unsigned int sector = 0;
             char key_letter = 0;
-            uint32_t cuid = 0;
+            SnifferCardPairRef logged = {0};
 
             if(sscanf(
                    furi_string_get_cstr(line),
-                   SNIFFER_CARD_NONCE_LOG_HEAD_FORMAT,
+                   SNIFFER_CARD_NONCE_LOG_SCAN_FORMAT,
                    &sector,
                    &key_letter,
-                   &cuid) != 3) {
+                   &logged.cuid,
+                   &logged.nt0,
+                   &logged.nr0,
+                   &logged.ar0,
+                   &logged.nt1,
+                   &logged.nr1,
+                   &logged.ar1) != SNIFFER_CARD_NONCE_LOG_SCAN_FIELDS) {
                 continue;
             }
 
-            const SnifferCardKeyRef logged = {
-                .cuid = cuid,
-                .sector = (uint8_t)sector,
-                .key_type = key_letter == 'B' ? SNIFFER_CARD_AUTH_KEY_B : SNIFFER_CARD_AUTH_KEY_A,
-            };
-
             for(size_t i = 0; i < pair_count; i++) {
-                if(sniffer_card_key_ref_eq(&pairs[i].key, &logged)) pairs[i].duplicate = true;
+                if(pairs[i].duplicate) continue;
+
+                const SnifferCardPairRef candidate = sniffer_card_pair_ref(pairs[i].a, pairs[i].b);
+                if(sniffer_card_pair_ref_eq(&candidate, &logged)) pairs[i].duplicate = true;
             }
         }
     } else {
@@ -181,9 +190,9 @@ static void sniffer_card_nonce_log_format(const SnifferCardNoncePair* pair, Furi
     furi_string_printf(
         line,
         SNIFFER_CARD_NONCE_LOG_FORMAT,
-        pair->key.sector,
-        a->key_type == SNIFFER_CARD_AUTH_KEY_A ? 'A' : 'B',
-        pair->key.cuid,
+        pair->sector,
+        pair->key_type == SNIFFER_CARD_AUTH_KEY_A ? 'A' : 'B',
+        sniffer_trace_get_cuid(a),
         a->nt,
         a->nr,
         a->ar,
@@ -194,8 +203,8 @@ static void sniffer_card_nonce_log_format(const SnifferCardNoncePair* pair, Furi
 
 /** Pair the captures and check them against the log, without writing anything.
  *
- * Counting and writing share this so they cannot disagree: a screen that promised two pairs and a
- * log that got one would be a bug invisible from either side.
+ * Counting and writing share this so they cannot disagree: a screen that promised nine pairs and
+ * a log that got eight would be a bug invisible from either side.
  */
 static size_t sniffer_card_nonce_log_prepare(
     Storage* storage,

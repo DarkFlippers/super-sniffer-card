@@ -25,8 +25,9 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
         furi_string_printf(
             app->text,
             // Four lines, which is what fits on a screen with no button row; a fifth runs off the
-            // bottom.
-            "%u nonce pair%s added\nto the MFKey nonce log.\n\nOpen MFKey to recover.",
+            // bottom. The time is named because every combination of captures is written, so the
+            // count can be high and MFKey spends minutes on each one.
+            "%u pair%s added to the\nMFKey nonce log.\n\nOpen MFKey: minutes each.",
             result.pairs_written,
             result.pairs_written == 1 ? "" : "s");
 

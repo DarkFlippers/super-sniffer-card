@@ -162,7 +162,21 @@ void sniffer_card_poller_set_uid(SnifferCardPoller* instance, const uint8_t* uid
     instance->uid_to_write_len = uid_len;
 }
 
-/** Send one `30 <arg>` and keep the answer. */
+/** Hex for the log, where what a card actually answered is the whole question. */
+static void sniffer_card_log_bytes(const char* label, const uint8_t* data, size_t len) {
+    FuriString* hex = furi_string_alloc();
+    for(size_t i = 0; i < len; i++) {
+        furi_string_cat_printf(hex, "%02X", data[i]);
+    }
+    FURI_LOG_I(TAG, "%s %s", label, furi_string_get_cstr(hex));
+    furi_string_free(hex);
+}
+
+/** Send one `30 <arg>` and keep the answer.
+ *
+ * Logged command and answer both: these cards are documented by two sources that disagree, and
+ * the only way to tell which sequence a particular one speaks is to see what it says back.
+ */
 static bool sniffer_card_poller_read_cmd(
     SnifferCardPoller* instance,
     Iso14443_3aPoller* iso3_poller,
@@ -174,7 +188,19 @@ static bool sniffer_card_poller_read_cmd(
     const Iso14443_3aError error = iso14443_3a_poller_send_standard_frame(
         iso3_poller, instance->tx_buffer, instance->rx_buffer, SNIFFER_CARD_POLLER_MAX_FWT);
 
-    return error == Iso14443_3aErrorNone;
+    if(error != Iso14443_3aErrorNone) {
+        FURI_LOG_I(TAG, "30 %02X -> error %d", arg, error);
+        return false;
+    }
+
+    FuriString* label = furi_string_alloc_printf("30 %02X ->", arg);
+    sniffer_card_log_bytes(
+        furi_string_get_cstr(label),
+        bit_buffer_get_data(instance->rx_buffer),
+        bit_buffer_get_size_bytes(instance->rx_buffer));
+    furi_string_free(label);
+
+    return true;
 }
 
 /** Take the UID and SAK off the activation the poller has just done. */
@@ -256,6 +282,11 @@ static SnifferCardPollerResult
         return SnifferCardPollerResultUidLenMismatch;
     }
 
+    sniffer_card_log_bytes(
+        "sniffer UID before:", instance->identity.uid, instance->identity.uid_len);
+    sniffer_card_log_bytes("UID to write:", instance->uid_to_write, SNIFFER_CARD_UID_WRITE_BYTES);
+    FURI_LOG_I(TAG, "SAK %02X", instance->identity.sak);
+
     for(size_t i = 0; i < COUNT_OF(sniffer_card_uid_knock); i++) {
         if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i])) {
             FURI_LOG_E(TAG, "Knock step %zu failed", i);
@@ -278,6 +309,8 @@ static SnifferCardPollerResult sniffer_card_poller_verify_uid(SnifferCardPoller*
     SnifferCardIdentity after;
     sniffer_card_poller_take_identity(instance, &after);
     instance->identity = after;
+
+    sniffer_card_log_bytes("sniffer UID after:", after.uid, after.uid_len);
 
     if(after.uid_len != instance->uid_to_write_len ||
        memcmp(after.uid, instance->uid_to_write, after.uid_len) != 0) {
