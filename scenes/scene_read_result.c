@@ -114,11 +114,20 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
 bool sniffer_card_app_scene_read_result_on_event(void* context, SceneManagerEvent event) {
     SnifferCardApp* app = context;
 
+    // Back leaves for the menu rather than falling into the read screen behind this one. Landing
+    // there would silently start another read, which is not what Back means anywhere else - and
+    // it would leave the explicit Retry button with nothing of its own to do.
+    if(event.type == SceneManagerEventTypeBack) {
+        scene_manager_search_and_switch_to_previous_scene(
+            app->scene_manager, SnifferCardAppSceneStart);
+        return true;
+    }
+
     if(event.type != SceneManagerEventTypeCustom) return false;
 
     if(event.event == SnifferCardAppCustomEventRetry) {
-        // Back to the read screen rather than forward to another copy of it, so Back from there
-        // still reaches the menu instead of walking a chain of retries.
+        // Back to the read screen rather than forward to another copy of it, so a run of retries
+        // does not grow the scene stack.
         scene_manager_previous_scene(app->scene_manager);
         return true;
     }

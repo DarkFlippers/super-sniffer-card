@@ -32,8 +32,17 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
 }
 
 bool sniffer_card_app_scene_saved_on_event(void* context, SceneManagerEvent event) {
-    UNUSED(context);
-    UNUSED(event);
+    SnifferCardApp* app = context;
+
+    // The nonces are written and the next step is in another app, so there is nothing left to go
+    // back through: Back returns to the menu rather than to the result screen and the read screen
+    // under it.
+    if(event.type == SceneManagerEventTypeBack) {
+        scene_manager_search_and_switch_to_previous_scene(
+            app->scene_manager, SnifferCardAppSceneStart);
+        return true;
+    }
+
     return false;
 }
 
