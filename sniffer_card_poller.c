@@ -372,7 +372,8 @@ static SnifferCardPollerResult
     FURI_LOG_I(TAG, "SAK %02X", instance->identity.sak);
 
     for(size_t i = 0; i < COUNT_OF(sniffer_card_uid_knock); i++) {
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i], true)) {
+        if(sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i], true) !=
+           Iso14443_3aErrorNone) {
             FURI_LOG_E(TAG, "Knock step %zu failed", i);
             return SnifferCardPollerResultError;
         }
@@ -380,7 +381,8 @@ static SnifferCardPollerResult
     }
 
     for(size_t i = 0; i < SNIFFER_CARD_UID_WRITE_BYTES; i++) {
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i], true)) {
+        if(sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i], true) !=
+           Iso14443_3aErrorNone) {
             FURI_LOG_E(TAG, "UID byte %zu failed", i);
             return SnifferCardPollerResultError;
         }
