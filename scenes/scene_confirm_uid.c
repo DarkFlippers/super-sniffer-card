@@ -27,7 +27,7 @@ void sniffer_card_app_scene_confirm_uid_on_enter(void* context) {
         sniffer_card_identity_get_type_name(&app->target),
         app->target.uid_len);
 
-    // A third body line and no blank one: SNIFFER_CARD_TEXT_LINES is what fits above the buttons,
+    // A third body line and no blank one: three body lines fit above the buttons,
     // and the blank line this used to carry pushed the advice under them, where it was drawn and
     // then painted over.
     if(is_classic) {

@@ -16,14 +16,19 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
 
     SnifferCardNonceLogResult result = {0};
     const bool saved = sniffer_card_nonce_log_save(app->traces, app->trace_count, &result);
-    const bool have_mfkey = sniffer_card_app_mfkey_installed();
+    const bool have_mfkey = app->mfkey_installed;
 
     const char* header;
     widget_reset(app->widget);
 
     if(!saved) {
+        // Which failure it was, because they call for different things: one is usually a missing
+        // or full SD card, the other a write that went wrong once the log was already open.
         header = "Not saved";
-        furi_string_printf(app->text, "Could not write\n" SNIFFER_CARD_NONCE_LOG_PATH);
+        furi_string_printf(
+            app->text,
+            result.open_failed ? "Could not open the log.\nCheck the SD card." :
+                                 "The write failed part way.\nNothing was added.");
         notification_message(app->notifications, &sequence_error);
 
     } else if(result.pairs_written == 0) {

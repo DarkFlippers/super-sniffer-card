@@ -1,5 +1,6 @@
 #include "sniffer_card.h"
 
+#include <bit_lib/bit_lib.h>
 #include <nfc/helpers/crypto1.h>
 #include <nfc/protocols/mf_classic/mf_classic.h>
 
@@ -10,10 +11,6 @@
  */
 #define SNIFFER_CARD_NT_ADVANCE 31
 
-static uint32_t sniffer_card_be32(const uint8_t* p) {
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
-}
-
 bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out) {
     furi_assert(raw);
     furi_assert(out);
@@ -21,8 +18,8 @@ bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out) {
     const uint8_t key_type = raw[4];
     if(key_type != SNIFFER_CARD_AUTH_KEY_A && key_type != SNIFFER_CARD_AUTH_KEY_B) return false;
 
-    const uint32_t nr = sniffer_card_be32(raw + 8);
-    const uint32_t ar = sniffer_card_be32(raw + 12);
+    const uint32_t nr = bit_lib_bytes_to_num_be(raw + 8, 4);
+    const uint32_t ar = bit_lib_bytes_to_num_be(raw + 12, 4);
     // An empty slot leaves both reader words zero. They are encrypted, so a real capture has no
     // reason to produce either - a reader that genuinely sent zeroes would still have them
     // keystreamed into something else.
@@ -31,7 +28,7 @@ bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out) {
     memcpy(out->cuid, raw, sizeof(out->cuid));
     out->key_type = key_type;
     out->block = raw[5];
-    out->nt = crypto1_prng_successor(((uint32_t)raw[6] << 8) | raw[7], SNIFFER_CARD_NT_ADVANCE);
+    out->nt = crypto1_prng_successor(bit_lib_bytes_to_num_be(raw + 6, 2), SNIFFER_CARD_NT_ADVANCE);
     out->nr = nr;
     out->ar = ar;
 
@@ -41,7 +38,7 @@ bool sniffer_trace_parse_gen2(const uint8_t* raw, SnifferTrace* out) {
 uint32_t sniffer_trace_get_cuid(const SnifferTrace* trace) {
     furi_assert(trace);
 
-    return sniffer_card_be32(trace->cuid);
+    return bit_lib_bytes_to_num_be(trace->cuid, sizeof(trace->cuid));
 }
 
 uint8_t sniffer_trace_get_sector(const SnifferTrace* trace) {

@@ -1,5 +1,11 @@
 #include "../sniffer_card_app.h"
 
+/** Carries the action the button was built for, which the screen decided when it chose the label.
+ *
+ * The right button is Save on some readings of a card and Run MFKey on others, so a handler told
+ * only "right was pressed" has to work out which - and working it out means re-pairing every
+ * capture and reading the whole nonce log again, to reach the answer this screen already had.
+ */
 static void sniffer_card_app_scene_read_result_button_callback(
     GuiButtonType type,
     InputType input,
@@ -11,7 +17,9 @@ static void sniffer_card_app_scene_read_result_button_callback(
     if(type == GuiButtonTypeLeft) {
         view_dispatcher_send_custom_event(app->view_dispatcher, SnifferCardAppCustomEventRetry);
     } else if(type == GuiButtonTypeRight) {
-        view_dispatcher_send_custom_event(app->view_dispatcher, SnifferCardAppCustomEventSave);
+        view_dispatcher_send_custom_event(
+            app->view_dispatcher,
+            scene_manager_get_scene_state(app->scene_manager, SnifferCardAppSceneReadResult));
     }
 }
 
@@ -184,13 +192,21 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
         // would report "nothing new to add" - and when there is nothing to run either, no button
         // is better than one that does nothing.
         if(pairs.pairs_written > 0) {
+            scene_manager_set_scene_state(
+                app->scene_manager,
+                SnifferCardAppSceneReadResult,
+                SnifferCardAppCustomEventSaveNonces);
             widget_add_button_element(
                 app->widget,
                 GuiButtonTypeRight,
                 "Save",
                 sniffer_card_app_scene_read_result_button_callback,
                 app);
-        } else if(pairs.pairs_duplicate > 0 && sniffer_card_app_mfkey_installed()) {
+        } else if(pairs.pairs_duplicate > 0 && app->mfkey_installed) {
+            scene_manager_set_scene_state(
+                app->scene_manager,
+                SnifferCardAppSceneReadResult,
+                SnifferCardAppCustomEventRunMfkey);
             widget_add_button_element(
                 app->widget,
                 GuiButtonTypeRight,
@@ -224,17 +240,13 @@ bool sniffer_card_app_scene_read_result_on_event(void* context, SceneManagerEven
         return true;
     }
 
-    if(event.event == SnifferCardAppCustomEventSave) {
-        // The same button, labelled for whichever of the two it is: Save when there is something
-        // to write, and the handover to MFKey when the log already holds it all.
-        SnifferCardNonceLogResult pairs;
-        sniffer_card_nonce_log_count(app->traces, app->trace_count, &pairs);
+    if(event.event == SnifferCardAppCustomEventSaveNonces) {
+        scene_manager_next_scene(app->scene_manager, SnifferCardAppSceneSaved);
+        return true;
+    }
 
-        if(pairs.pairs_written > 0) {
-            scene_manager_next_scene(app->scene_manager, SnifferCardAppSceneSaved);
-        } else {
-            sniffer_card_app_run_mfkey(app);
-        }
+    if(event.event == SnifferCardAppCustomEventRunMfkey) {
+        sniffer_card_app_run_mfkey(app);
         return true;
     }
 

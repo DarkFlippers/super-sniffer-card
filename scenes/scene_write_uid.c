@@ -11,14 +11,11 @@ void sniffer_card_app_scene_write_uid_on_enter(void* context) {
     SnifferCardApp* app = context;
 
     popup_reset(app->popup);
-    popup_set_header(app->popup, "Setting UID", 64, 8, AlignCenter, AlignTop);
-    popup_set_text(
-        app->popup,
-        "Hold the SNIFFER card\nagainst the Flipper\nuntil it reports back",
-        64,
-        24,
-        AlignCenter,
-        AlignTop);
+    popup_set_icon(app->popup, 0, 0, &I_NFC_dolphin_emulation_51x64);
+    popup_set_header(app->popup, "Setting UID", 90, 10, AlignCenter, AlignTop);
+    // "Still" earns its line: the write power-cycles the card to read the UID back, and a card
+    // lifted during that reports as unconfirmed rather than as written.
+    popup_set_text(app->popup, "Hold the\nsniffer card\nstill", 90, 26, AlignCenter, AlignTop);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewPopup);
 

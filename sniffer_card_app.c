@@ -1,7 +1,5 @@
 #include "sniffer_card_app.h"
 
-#define TAG "SnifferCard"
-
 static bool sniffer_card_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     SnifferCardApp* app = context;
@@ -25,14 +23,6 @@ void sniffer_card_app_take_result(SnifferCardApp* app) {
     app->trace_count = count;
     app->read_truncated = sniffer_card_poller_read_was_truncated(app->poller);
     app->result = sniffer_card_poller_get_result(app->poller);
-}
-
-bool sniffer_card_app_mfkey_installed(void) {
-    Storage* storage = furi_record_open(RECORD_STORAGE);
-    const bool installed = storage_common_exists(storage, SNIFFER_CARD_MFKEY_PATH);
-    furi_record_close(RECORD_STORAGE);
-
-    return installed;
 }
 
 void sniffer_card_app_run_mfkey(SnifferCardApp* app) {
@@ -94,6 +84,10 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
     app->result = SnifferCardPollerResultWaiting;
     app->trace_count = 0;
     app->read_truncated = false;
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    app->mfkey_installed = storage_common_exists(storage, SNIFFER_CARD_MFKEY_PATH);
+    furi_record_close(RECORD_STORAGE);
     memset(&app->target, 0, sizeof(app->target));
     memset(app->uid_input, 0, sizeof(app->uid_input));
     app->uid_input_len = 0;

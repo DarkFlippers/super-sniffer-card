@@ -24,24 +24,15 @@
 #include "sniffer_card_poller.h"
 #include "scenes/scenes.h"
 
-/** Top of the button row.
+/** First body line under a FontPrimary title.
  *
- * elements_button_left/center/right - the three a widget button can draw - all anchor at
- * canvas_height() - 12, so a button box covers rows 52..63. The buttons are drawn after the text,
- * so a line sharing those rows is not clipped, it is painted over.
+ * Three body lines fit above a button row and no more. The buttons anchor at
+ * canvas_height() - 12, so a button box covers rows 52..63 and is drawn after the text - a fourth
+ * line is not clipped, it is painted over, which looks exactly like the text simply ending.
+ * FontSecondary steps 11 rows, so from here the third line ends at 45 and a fourth would start at
+ * 49. A screen with no buttons gets four.
  */
-#define SNIFFER_CARD_BUTTON_ROW_Y 52
-
-/** First body line under a FontPrimary title. */
 #define SNIFFER_CARD_TEXT_Y 16
-
-/** Body lines that fit under a title on a screen that also has buttons.
- *
- * FontSecondary steps 11 rows a line, so from SNIFFER_CARD_TEXT_Y the third line ends at 45 and a
- * fourth would start at 49 and run under the button row. Written down because getting it wrong
- * costs a line that is still there, still correct, and invisible.
- */
-#define SNIFFER_CARD_TEXT_LINES 3
 
 /** Where the MFKey app lives when it is installed, spelled as the firmware's NFC app spells it
  * (`NFC_MFKEY32_APP_PATH` in `applications/main/nfc/nfc_app_i.h`).
@@ -92,6 +83,10 @@ typedef struct {
     uint8_t uid_input[SNIFFER_CARD_UID_MAX];
     size_t uid_input_len;
 
+    /** Whether the MFKey app is installed. Resolved once: it is an SD stat through the storage
+     * service, and no other app can install one while this one is in the foreground. */
+    bool mfkey_installed;
+
     // One scratch string, reused by whichever screen is building its text, rather than an
     // allocation per screen.
     //
@@ -113,16 +108,18 @@ typedef enum {
 // above any index a submenu in this app can produce.
 typedef enum {
     SnifferCardAppCustomEventPollerDone = 100, /**< The NFC session reached a verdict. */
-    SnifferCardAppCustomEventSave, /**< Right button on the trace result screen. */
+    /** Named for what they do, not for which button carries them. A handler given a button
+     * position has to work out the action again - which on the trace result screen meant
+     * re-pairing every capture and re-reading the whole nonce log to recover a decision the
+     * screen had already made when it chose the label. */
+    SnifferCardAppCustomEventSaveNonces,
+    SnifferCardAppCustomEventRunMfkey,
     SnifferCardAppCustomEventRetry,
     SnifferCardAppCustomEventNext, /**< Right button on a screen that only moves forward. */
 } SnifferCardAppCustomEvent;
 
 /** Take the result of a finished session out of the poller and into the app. */
 void sniffer_card_app_take_result(SnifferCardApp* app);
-
-/** Whether the MFKey app is installed, and so whether running it can be offered. */
-bool sniffer_card_app_mfkey_installed(void);
 
 /** Hand over to MFKey and quit.
  *

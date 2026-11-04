@@ -6,7 +6,7 @@
 /** Where the NFC app keeps saved cards, and the extension it saves them under. */
 #define TAG "SnifferCard"
 
-#define SNIFFER_CARD_DUMP_FOLDER    EXT_PATH("nfc")
+#define SNIFFER_CARD_DUMP_FOLDER    SNIFFER_CARD_NONCE_LOG_FOLDER
 #define SNIFFER_CARD_DUMP_EXTENSION ".nfc"
 
 /** Take the UID, and the SAK if there is one, out of a saved card.

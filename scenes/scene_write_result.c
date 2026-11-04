@@ -115,8 +115,8 @@ void sniffer_card_app_scene_write_result_on_enter(void* context) {
             // On success the useful thing to show is the UID the card now answers as, read back
             // off it rather than echoed from what was asked for.
             sniffer_card_app_uid_text(identity->uid, identity->uid_len, app->text);
-            // Three lines total, no blank one: a fourth would start below
-            // SNIFFER_CARD_BUTTON_ROW_Y and be painted over by the buttons.
+            // Three lines total, no blank one: a fourth would start under the button row and
+            // be painted over by it.
             furi_string_cat_str(app->text, "\nThe sniffer card now\nanswers as the original");
         }
 

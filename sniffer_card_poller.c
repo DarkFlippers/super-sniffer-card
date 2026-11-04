@@ -44,9 +44,6 @@ static const uint8_t sniffer_card_uid_knock[] = {0xF3, 0x2A, 0xBD, 0xEF, 0x01};
 #define SNIFFER_CARD_CMD_HALT_0 (0x50)
 #define SNIFFER_CARD_CMD_HALT_1 (0x00)
 
-/** Status byte the card answers a command with while it is taking UID bytes. */
-#define SNIFFER_CARD_STATUS_ARMED (0x11)
-
 /** Status byte the card answers the committing HLTA with. */
 #define SNIFFER_CARD_STATUS_COMMITTED (0x22)
 
@@ -134,7 +131,6 @@ struct SnifferCardPoller {
     SnifferCardIdentity identity;
     SnifferTrace traces[SNIFFER_CARD_TRACE_SLOTS];
     size_t trace_count;
-    size_t slots_read;
     bool read_truncated;
     uint8_t verify_attempts;
 };
@@ -155,8 +151,6 @@ const char* sniffer_card_identity_get_type_name(const SnifferCardIdentity* ident
         return "Mini";
     case MfClassicType1k:
         return "1K";
-    case MfClassicType2k:
-        return "2K";
     case MfClassicType4k:
         return "4K";
     default:
@@ -180,7 +174,6 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
-    instance->slots_read = 0;
     instance->read_truncated = false;
     instance->verify_attempts = 0;
 
@@ -210,14 +203,28 @@ void sniffer_card_poller_set_uid(SnifferCardPoller* instance, const uint8_t* uid
     instance->uid_to_write_len = uid_len;
 }
 
-/** Hex for the log, where what a card actually answered is the whole question. */
+/** Hex for the log, where what a card actually answered is the whole question.
+ *
+ * Built onto the stack and gated on the level, because FURI_LOG_D is a plain call to
+ * furi_log_print_format() and the level test lives inside it - so every argument is evaluated
+ * whether or not anything will print. This runs between the frames of a sequence that ends with
+ * the card committing to flash, on the NFC worker thread with the field up, so at the default
+ * level it was a dozen heap allocations bought to be thrown away.
+ */
 static void sniffer_card_log_bytes(const char* label, const uint8_t* data, size_t len) {
-    FuriString* hex = furi_string_alloc();
+    if(furi_log_get_level() < FuriLogLevelDebug) return;
+
+    static const char digits[] = "0123456789ABCDEF";
+    char hex[SNIFFER_CARD_TRACE_SIZE * 2 + 1];
+
+    furi_check(len <= SNIFFER_CARD_TRACE_SIZE);
     for(size_t i = 0; i < len; i++) {
-        furi_string_cat_printf(hex, "%02X", data[i]);
+        hex[i * 2] = digits[data[i] >> 4];
+        hex[i * 2 + 1] = digits[data[i] & 0x0F];
     }
-    FURI_LOG_D(TAG, "%s %s", label, furi_string_get_cstr(hex));
-    furi_string_free(hex);
+    hex[len * 2] = '\0';
+
+    FURI_LOG_D(TAG, "%s %s", label, hex);
 }
 
 /** Send one `30 <arg>` and keep the answer.
@@ -231,7 +238,7 @@ static void sniffer_card_log_bytes(const char* label, const uint8_t* data, size_
  *        normal use, and the retry that followed succeeded. For a trace read it is fatal, because
  *        the bytes are the point. nfc_magic tolerates the same error in its Gen2 detection.
  */
-static bool sniffer_card_poller_read_cmd(
+static Iso14443_3aError sniffer_card_poller_read_cmd(
     SnifferCardPoller* instance,
     Iso14443_3aPoller* iso3_poller,
     uint8_t arg,
@@ -245,22 +252,22 @@ static bool sniffer_card_poller_read_cmd(
 
     if(error == Iso14443_3aErrorWrongCrc && allow_wrong_crc) {
         FURI_LOG_W(TAG, "30 %02X -> bad CRC, carrying on", arg);
-        return true;
+        return Iso14443_3aErrorNone;
     }
 
     if(error != Iso14443_3aErrorNone) {
         FURI_LOG_D(TAG, "30 %02X -> error %d", arg, error);
-        return false;
+        return error;
     }
 
-    FuriString* label = furi_string_alloc_printf("30 %02X ->", arg);
+    char label[12];
+    snprintf(label, sizeof(label), "30 %02X ->", arg);
     sniffer_card_log_bytes(
-        furi_string_get_cstr(label),
+        label,
         bit_buffer_get_data(instance->rx_buffer),
         bit_buffer_get_size_bytes(instance->rx_buffer));
-    furi_string_free(label);
 
-    return true;
+    return Iso14443_3aErrorNone;
 }
 
 /** Take the UID and SAK off the activation the poller has just done. */
@@ -294,42 +301,47 @@ static SnifferCardPollerResult
     }
 
     instance->trace_count = 0;
-    instance->slots_read = 0;
 
     uint8_t page = 0;
     for(; page < SNIFFER_CARD_TRACE_SLOTS; page++) {
-        // Both of these end the loop, and until now both were indistinguishable from the card
-        // simply running out of slots. They are not the same thing: a read that broke off has
-        // left captures unread, and telling the user to go and collect more would overwrite
-        // them.
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, page, false)) break;
+        const Iso14443_3aError error =
+            sniffer_card_poller_read_cmd(instance, iso3_poller, page, false);
+
+        if(error != Iso14443_3aErrorNone) {
+            // Why the read stopped decides what the user is told, so the two reasons are kept
+            // apart rather than inferred afterwards from how far the loop got.
+            //
+            // A card that has stopped answering altogether still holds whatever it had not
+            // handed over, and the usual advice - go and tap a reader - would overwrite it. A
+            // card that merely refuses this slot has run out of slots, which is how a card with
+            // seven of them ends a loop written for eight. Judging that by the page number
+            // instead would call every read of such a card truncated.
+            instance->read_truncated = error == Iso14443_3aErrorTimeout ||
+                                       error == Iso14443_3aErrorNotPresent;
+            break;
+        }
+
+        // An answer of the wrong shape is the card declining, not the link failing.
         if(bit_buffer_get_size_bytes(instance->rx_buffer) != SNIFFER_CARD_TRACE_SIZE) break;
 
-        uint8_t raw[SNIFFER_CARD_TRACE_SIZE];
-        bit_buffer_write_bytes(instance->rx_buffer, raw, sizeof(raw));
-        instance->slots_read++;
-
         SnifferTrace trace;
-        if(sniffer_trace_parse_gen2(raw, &trace)) {
+        if(sniffer_trace_parse_gen2(bit_buffer_get_data(instance->rx_buffer), &trace)) {
             instance->traces[instance->trace_count++] = trace;
         }
     }
 
     // A MIFARE Classic answers an unauthenticated read with a NAK, so no slot read at all is the
     // ordinary outcome for an ordinary card and not an error worth reporting as one.
-    if(instance->slots_read == 0) {
+    if(page == 0) {
         FURI_LOG_I(TAG, "No slot answered: not a Gen2 sniffer card");
         return SnifferCardPollerResultNotSniffer;
     }
 
-    // Stopped early with something already read: the card is a sniffer card and the read is
-    // short, which is the one case where "nothing captured" would be a lie.
-    instance->read_truncated = page < SNIFFER_CARD_TRACE_SLOTS;
     if(instance->read_truncated) {
-        FURI_LOG_W(TAG, "Read stopped at slot %u of %u", page, SNIFFER_CARD_TRACE_SLOTS);
+        FURI_LOG_W(TAG, "Read broke off at slot %u of %u", page, SNIFFER_CARD_TRACE_SLOTS);
     }
 
-    FURI_LOG_I(TAG, "%zu slots read, %zu captures", instance->slots_read, instance->trace_count);
+    FURI_LOG_I(TAG, "%u slots read, %zu captures", page, instance->trace_count);
 
     return SnifferCardPollerResultSuccess;
 }
@@ -527,7 +539,6 @@ void sniffer_card_poller_start(
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
-    instance->slots_read = 0;
     instance->read_truncated = false;
     instance->verify_attempts = 0;
     // A write session that was never given a UID would otherwise run on whatever the last one

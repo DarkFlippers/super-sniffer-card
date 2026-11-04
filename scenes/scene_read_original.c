@@ -11,14 +11,9 @@ void sniffer_card_app_scene_read_original_on_enter(void* context) {
     SnifferCardApp* app = context;
 
     popup_reset(app->popup);
-    popup_set_header(app->popup, "Original card", 64, 8, AlignCenter, AlignTop);
-    popup_set_text(
-        app->popup,
-        "Hold the card you want\nthe keys for against\nthe Flipper",
-        64,
-        24,
-        AlignCenter,
-        AlignTop);
+    popup_set_icon(app->popup, 0, 0, &I_NFC_dolphin_emulation_51x64);
+    popup_set_header(app->popup, "Original card", 90, 10, AlignCenter, AlignTop);
+    popup_set_text(app->popup, "Hold the card\nyou want keys\nfor", 90, 26, AlignCenter, AlignTop);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewPopup);
 

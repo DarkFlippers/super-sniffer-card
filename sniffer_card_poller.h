@@ -56,6 +56,10 @@ typedef struct {
 
 /** The MIFARE Classic size a SAK declares.
  *
+ * Only the SAK half of the firmware's own detection is mirrored: an activation yields no ATS and
+ * no authenticated probe, so the MIFARE Plus 2K promotion and the legacy block-presence fallback
+ * it also has cannot be reproduced here, and 2K is therefore never returned.
+ *
  * AN10833 encodes the size as bits rather than whole values, which is what the firmware's own
  * `mf_classic_poller_handler_detect_type()` tests - so a magic card that answers every block is
  * not mis-sized against its own SAK. Mini shares the 1K bit and has to be matched first.
