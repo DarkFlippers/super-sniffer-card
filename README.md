@@ -38,9 +38,14 @@ authentication, and recovering a key needs two of the same sector. Come back whe
    Flipper's NFC app can then read the original card.
 
 Reading the same card twice is safe: the card keeps its captures until a reader overwrites them,
-and a pair whose key the log already covers is skipped rather than appended again. The screen says
-how many were skipped, so a card with nothing new on it reads as "nothing new to add" rather than
-as a card that captured nothing.
+and a pair the log already holds - all six of its words, either way round - is skipped rather than
+appended again. The screen says how many were skipped, so a card with nothing new on it reads as
+"all pairs already in the log" rather than as a card that captured nothing.
+
+Pairs are formed from every combination of two captures of one card, sector and key type. Which of
+them actually share a key is what mfkey32 answers, so it cannot be decided here - a reader may
+present several keys to one sector, the real one among decoys, and pairing only the first two
+would write confident lines that can never succeed while a recoverable pair went unwritten.
 
 ## Why MFKey does the recovery
 
