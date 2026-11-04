@@ -74,7 +74,10 @@ static void sniffer_card_app_scene_read_result_build_text(
         furi_string_cat_printf(app->text, "%u unpaired, tap again\n", pairs->traces_unpaired);
     }
 
-    furi_string_cat_str(app->text, "\n" SNIFFER_CARD_LINE_MONO "Sec Key Nonce\n");
+    // No column header. Two digits, a letter and eight hex digits say what they are, and on a
+    // 64-pixel screen the row it would cost is the difference between a short card fitting
+    // without scrolling and not.
+    furi_string_cat_str(app->text, "\n");
 
     uint32_t shown_cuid = 0;
     bool have_shown_cuid = false;
