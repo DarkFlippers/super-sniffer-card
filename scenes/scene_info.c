@@ -7,37 +7,38 @@
 // Written as the job in order rather than as a description of the app. Someone opening this has
 // a card in one hand and no idea which of the two menu entries comes first, and that is the one
 // question worth answering on a 128x64 screen.
-#define SNIFFER_CARD_HOWTO_TEXT     \
-    "1. Set Sniffer UID\n"          \
-    "Give the sniffer card the\n"   \
-    "UID of the card you want\n"    \
-    "keys for - from a tag, a\n"    \
-    "saved dump, or typed in.\n"    \
-    "\n"                            \
-    "2. Hold it on the reader\n"    \
-    "At least twice. Each tap\n"    \
-    "records one login attempt,\n"  \
-    "and a key needs two of the\n"  \
-    "same sector to crack.\n"       \
-    "\n"                            \
-    "3. Read Sniffer Card\n"        \
-    "Back here, read it, Save.\n"   \
-    "\n"                            \
-    "4. Run MFKey\n"                \
-    "It does the cracking and\n"    \
-    "puts the keys in your user\n"  \
-    "dictionary, so the NFC app\n"  \
-    "can then read the original.\n" \
-    "No MFKey? qUnleashed can\n"    \
-    "do it on a PC instead.\n"      \
-    "\n"                            \
-    "Reading twice is safe: a\n"    \
-    "pair already in the log is\n"  \
-    "skipped, not added again.\n"   \
-    "\n"                            \
-    "Works with Gen2 cards, the\n"  \
-    "ones answering a plain\n"      \
-    "30 xx read. Gen1 and Furui\n"  \
+#define SNIFFER_CARD_HOWTO_TEXT    \
+    "1. Set Sniffer UID\n"         \
+    "Give the sniffer card the\n"  \
+    "UID of the card you want\n"   \
+    "keys for - from a tag, a\n"   \
+    "saved dump, or typed in.\n"   \
+    "\n"                           \
+    "2. Hold it on the reader\n"   \
+    "At least twice. Each tap\n"   \
+    "records one login attempt,\n" \
+    "and a key needs two of the\n" \
+    "same sector to crack.\n"      \
+    "\n"                           \
+    "3. Read Sniffer Card\n"       \
+    "Back here, read it, Save.\n"  \
+    "\n"                           \
+    "4. Recover the keys\n"        \
+    "MFKey on the Flipper takes\n" \
+    "minutes a pair and puts\n"    \
+    "them in your user dict.\n"    \
+    "qUnleashed on a PC does\n"    \
+    "the same far faster.\n"       \
+    "Then the NFC app can read\n"  \
+    "the original card.\n"         \
+    "\n"                           \
+    "Reading twice is safe: a\n"   \
+    "pair already in the log is\n" \
+    "skipped, not added again.\n"  \
+    "\n"                           \
+    "Works with Gen2 cards, the\n" \
+    "ones answering a plain\n"     \
+    "30 xx read. Gen1 and Furui\n" \
     "are not supported yet."
 
 void sniffer_card_app_scene_info_on_enter(void* context) {

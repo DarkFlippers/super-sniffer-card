@@ -1,5 +1,7 @@
 #include "../sniffer_card_app.h"
 
+#include <sniffer_card_icons.h>
+
 /** Called on the NFC worker thread when the session has a verdict.
  *
  * Nothing but the hand-off: the result is read back, and everything decided about it, on the GUI

@@ -1,5 +1,7 @@
 #include "../sniffer_card_app.h"
 
+#include <sniffer_card_icons.h>
+
 static void sniffer_card_app_scene_write_uid_poller_callback(void* context) {
     SnifferCardApp* app = context;
     view_dispatcher_send_custom_event(app->view_dispatcher, SnifferCardAppCustomEventPollerDone);

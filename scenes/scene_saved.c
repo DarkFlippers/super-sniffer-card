@@ -45,12 +45,13 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
             "%u pair%s added to the\nMFKey nonce log.\n",
             result.pairs_written,
             result.pairs_written == 1 ? "" : "s");
-        // Where the keys actually come from. With MFKey installed that is a button; without it,
-        // the only useful thing to say is where to get one, because this app deliberately does
-        // not do the recovery itself.
+        // qUnleashed is named either way. On the Flipper a pair takes minutes, and the same work
+        // on a PC is seconds - so it is the better option often enough that hiding it behind "no
+        // MFKey installed" would be hiding the faster route from the people who have both.
         furi_string_cat_str(
             app->text,
-            have_mfkey ? "Each takes minutes." : "Recover with the MFKey\napp, or qUnleashed.");
+            have_mfkey ? "Or qUnleashed, much faster." :
+                         "Recover with MFKey, or\nqUnleashed on a PC.");
         notification_message(app->notifications, &sequence_success);
     }
 
