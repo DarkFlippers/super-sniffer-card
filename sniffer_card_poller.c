@@ -195,7 +195,7 @@ static void sniffer_card_log_bytes(const char* label, const uint8_t* data, size_
     for(size_t i = 0; i < len; i++) {
         furi_string_cat_printf(hex, "%02X", data[i]);
     }
-    FURI_LOG_I(TAG, "%s %s", label, furi_string_get_cstr(hex));
+    FURI_LOG_D(TAG, "%s %s", label, furi_string_get_cstr(hex));
     furi_string_free(hex);
 }
 
@@ -216,7 +216,7 @@ static bool sniffer_card_poller_read_cmd(
         iso3_poller, instance->tx_buffer, instance->rx_buffer, SNIFFER_CARD_POLLER_MAX_FWT);
 
     if(error != Iso14443_3aErrorNone) {
-        FURI_LOG_I(TAG, "30 %02X -> error %d", arg, error);
+        FURI_LOG_D(TAG, "30 %02X -> error %d", arg, error);
         return false;
     }
 
@@ -256,7 +256,7 @@ static void
 static SnifferCardPollerResult
     sniffer_card_poller_read_traces(SnifferCardPoller* instance, Iso14443_3aPoller* iso3_poller) {
     if(instance->identity.sak == SNIFFER_CARD_SAK_NOT_CLASSIC) {
-        FURI_LOG_D(TAG, "Not a Classic-emulating tag");
+        FURI_LOG_I(TAG, "Not a Classic-emulating tag, SAK %02X", instance->identity.sak);
         return SnifferCardPollerResultWrongCard;
     }
 
@@ -280,7 +280,7 @@ static SnifferCardPollerResult
     // A MIFARE Classic answers an unauthenticated read with a NAK, so no slot read at all is the
     // ordinary outcome for an ordinary card and not an error worth reporting as one.
     if(instance->slots_read == 0) {
-        FURI_LOG_D(TAG, "No slot answered");
+        FURI_LOG_I(TAG, "No slot answered: not a Gen2 sniffer card");
         return SnifferCardPollerResultWrongCard;
     }
 
@@ -293,7 +293,7 @@ static SnifferCardPollerResult
 static SnifferCardPollerResult
     sniffer_card_poller_write_uid(SnifferCardPoller* instance, Iso14443_3aPoller* iso3_poller) {
     if(instance->identity.sak == SNIFFER_CARD_SAK_NOT_CLASSIC) {
-        FURI_LOG_D(TAG, "Not a Classic-emulating tag");
+        FURI_LOG_I(TAG, "Not a Classic-emulating tag, SAK %02X", instance->identity.sak);
         return SnifferCardPollerResultWrongCard;
     }
 
