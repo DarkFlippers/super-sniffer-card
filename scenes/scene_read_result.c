@@ -15,58 +15,85 @@ static void sniffer_card_app_scene_read_result_button_callback(
     }
 }
 
-/** Spell out what was read: a verdict, then one line per capture.
+/** Line prefixes the text scroll element understands, each applying to the line it opens.
  *
- * Each capture carries its tag nonce. Sector, key type and block are not enough to tell two
- * captures apart - a reader working one sector produces a column of identical-looking lines, and
- * on a real card that is the common case rather than a corner one. The nonce is what differs, and
- * printing it is also what shows the list is not repeating itself.
+ * `\e#` switches that line to FontPrimary and `\e*` to FontKeyboard, which is the only monospaced
+ * font available - and the only way to get columns that line up, since the body font is
+ * proportional (`widget_element_text_scroll_process_ctrl_symbols()` in the firmware).
+ */
+#define SNIFFER_CARD_LINE_BOLD "\e#"
+#define SNIFFER_CARD_LINE_MONO "\e*"
+
+/** Spell out what was read: the counts, then the captures as a table.
+ *
+ * Each row carries its tag nonce. Sector and key type are not enough to tell two captures apart -
+ * a reader working one sector produces a column of identical-looking rows, and a reader that
+ * tries several keys against that sector, real and not, produces them with different keys behind
+ * them. The nonce is what differs, and it is also what shows the list is not repeating itself.
+ *
+ * The UID is a row of its own rather than a column, because every capture of one read normally
+ * shares it - and when it does not, because the card was reprogrammed between taps, a change of
+ * UID is worth more than repeating thirty-two identical bits down the side.
  */
 static void sniffer_card_app_scene_read_result_build_text(
     SnifferCardApp* app,
     const SnifferCardNonceLogResult* pairs) {
-    if(pairs->pairs_written > 0) {
-        furi_string_printf(
+    // Two bold lines: what came off the card, and where that leaves the log.
+    furi_string_printf(
+        app->text,
+        SNIFFER_CARD_LINE_BOLD "%u capture%s\n",
+        app->trace_count,
+        app->trace_count == 1 ? "" : "s");
+
+    if(pairs->pairs_written > 0 && pairs->pairs_duplicate > 0) {
+        furi_string_cat_printf(
             app->text,
-            "%u captures, %u new pair%s\n",
-            app->trace_count,
+            SNIFFER_CARD_LINE_BOLD "%u new, %u in log\n",
+            pairs->pairs_written,
+            pairs->pairs_duplicate);
+    } else if(pairs->pairs_written > 0) {
+        furi_string_cat_printf(
+            app->text,
+            SNIFFER_CARD_LINE_BOLD "%u new pair%s\n",
             pairs->pairs_written,
             pairs->pairs_written == 1 ? "" : "s");
-
-        if(pairs->pairs_duplicate > 0) {
-            furi_string_cat_printf(app->text, "%u more already saved\n", pairs->pairs_duplicate);
-        }
     } else if(pairs->pairs_duplicate > 0) {
-        // Everything pairable here is already waiting for MFKey. Said as a state rather than as
-        // two counts, because "0 new pairs" next to a Save button read as a failure.
-        furi_string_printf(
+        // Said as a state rather than as a zero, because "0 new pairs" read as a failure.
+        furi_string_cat_printf(
             app->text,
-            "%u captures, all %u pair%s\nalready in the log\n",
-            app->trace_count,
+            SNIFFER_CARD_LINE_BOLD "All %u pair%s in log\n",
             pairs->pairs_duplicate,
             pairs->pairs_duplicate == 1 ? "" : "s");
     } else {
-        furi_string_printf(app->text, "%u captures, no pairs\n", app->trace_count);
+        furi_string_cat_str(app->text, SNIFFER_CARD_LINE_BOLD "No pairs yet\n");
     }
 
     if(pairs->traces_unpaired > 0) {
         // The one shortfall another tap on the reader fixes: a capture whose key nothing else
         // here shares cannot be cracked, however good it is.
-        furi_string_cat_printf(
-            app->text, "%u unpaired - needs another\ntap on the reader\n", pairs->traces_unpaired);
+        furi_string_cat_printf(app->text, "%u unpaired, tap again\n", pairs->traces_unpaired);
     }
 
-    furi_string_cat_str(app->text, "\n");
+    furi_string_cat_str(app->text, "\n" SNIFFER_CARD_LINE_MONO "Sec Key Nonce\n");
+
+    uint32_t shown_cuid = 0;
+    bool have_shown_cuid = false;
 
     for(size_t i = 0; i < app->trace_count; i++) {
         const SnifferTrace* trace = &app->traces[i];
+        const uint32_t cuid = sniffer_trace_get_cuid(trace);
+
+        if(!have_shown_cuid || cuid != shown_cuid) {
+            furi_string_cat_printf(app->text, "UID: %08lX\n", cuid);
+            shown_cuid = cuid;
+            have_shown_cuid = true;
+        }
+
         furi_string_cat_printf(
             app->text,
-            "%u Sec%u %c blk%u %08lX\n",
-            i + 1,
+            SNIFFER_CARD_LINE_MONO "%02u  %c   %08lX\n",
             sniffer_trace_get_sector(trace),
             trace->key_type == SNIFFER_CARD_AUTH_KEY_A ? 'A' : 'B',
-            trace->block,
             trace->nt);
     }
 }
