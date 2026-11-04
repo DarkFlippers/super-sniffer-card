@@ -54,6 +54,8 @@ sector produces them with different keys behind them.
 5. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
    Flipper's NFC app can then read the original card.
 
+![Saved, and the hand-off to MFKey](screenshots/saved.png)
+
 Reading the same card twice is safe: the card keeps its captures until a reader overwrites them,
 and a pair the log already holds - all six of its words, either way round - is skipped rather than
 appended again. The screen says how many were skipped, so a card with nothing new on it reads as
