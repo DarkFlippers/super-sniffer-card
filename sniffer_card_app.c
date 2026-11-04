@@ -23,7 +23,7 @@ void sniffer_card_app_take_result(SnifferCardApp* app) {
     furi_check(count <= COUNT_OF(app->traces));
     memcpy(app->traces, traces, count * sizeof(SnifferTrace));
     app->trace_count = count;
-    app->slots_read = sniffer_card_poller_get_slots_read(app->poller);
+    app->read_truncated = sniffer_card_poller_read_was_truncated(app->poller);
     app->result = sniffer_card_poller_get_result(app->poller);
 }
 
@@ -93,7 +93,7 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
 
     app->result = SnifferCardPollerResultWaiting;
     app->trace_count = 0;
-    app->slots_read = 0;
+    app->read_truncated = false;
     memset(&app->target, 0, sizeof(app->target));
     memset(app->uid_input, 0, sizeof(app->uid_input));
     app->uid_input_len = 0;

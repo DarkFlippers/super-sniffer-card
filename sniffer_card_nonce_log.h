@@ -13,7 +13,8 @@
  * `applications/main/nfc/nfc_app_i.h`, which is firmware-private and not in the FAP SDK. Both
  * sides of that split are checked in this repo's README.
  */
-#define SNIFFER_CARD_NONCE_LOG_PATH EXT_PATH("nfc/.mfkey32.log")
+#define SNIFFER_CARD_NONCE_LOG_PATH   EXT_PATH("nfc/.mfkey32.log")
+#define SNIFFER_CARD_NONCE_LOG_FOLDER EXT_PATH("nfc")
 
 /** Every combination of two captures, which is the most pairs a card can yield. */
 #define SNIFFER_CARD_MAX_PAIRS (SNIFFER_CARD_TRACE_SLOTS * (SNIFFER_CARD_TRACE_SLOTS - 1) / 2)
@@ -23,6 +24,18 @@ typedef struct {
     size_t pairs_written; /**< Lines appended. */
     size_t pairs_duplicate; /**< Pairs already in the log, byte for byte. */
     size_t traces_unpaired; /**< Captures that pair with nothing at all. */
+    /** The log could not be opened for writing, as against written to and failed.
+     *
+     * Kept apart because they need different things said: one is usually a missing or full SD
+     * card, the other a write that went wrong part way. */
+    bool open_failed;
+    /** The existing log could not be read, so nothing was compared against it.
+     *
+     * Everything then looks new, and re-reading a card appends work the log may already hold -
+     * which MFKey will not notice, since its loader does not deduplicate. Writing a possible
+     * duplicate beats refusing captures the card is about to overwrite, but the uncertainty has
+     * to reach the screen rather than stop here. */
+    bool log_unchecked;
 } SnifferCardNonceLogResult;
 
 /** Append every usable pair of traces to the MFKey nonce log.

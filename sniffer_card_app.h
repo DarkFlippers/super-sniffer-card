@@ -79,7 +79,8 @@ typedef struct {
     SnifferCardPollerResult result;
     SnifferTrace traces[SNIFFER_CARD_TRACE_SLOTS];
     size_t trace_count;
-    size_t slots_read;
+    /** The read stopped before the card ran out of slots, so captures were left behind. */
+    bool read_truncated;
 
     // The UID the sniffer card is to be given, however it was come by: read off the card the keys
     // are wanted for, or typed in. A typed one has no SAK, which is why nothing past the confirm
@@ -91,8 +92,13 @@ typedef struct {
     uint8_t uid_input[SNIFFER_CARD_UID_MAX];
     size_t uid_input_len;
 
-    // Text built once on entering a screen and held while that screen draws it: Widget keeps the
-    // pointer it is given rather than copying the string.
+    // One scratch string, reused by whichever screen is building its text, rather than an
+    // allocation per screen.
+    //
+    // Safe to reuse because every Widget element copies what it is given - each of them does
+    // furi_string_alloc_set() on construction - and because scene_manager runs a scene's on_exit,
+    // and so its widget_reset(), before the next scene's on_enter. The string's contents after
+    // that point belong to nobody.
     FuriString* text;
 } SnifferCardApp;
 

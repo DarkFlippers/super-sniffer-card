@@ -139,7 +139,10 @@ static size_t sniffer_card_nonce_log_collect(
 static void sniffer_card_nonce_log_mark_duplicates(
     Storage* storage,
     SnifferCardNoncePair* pairs,
-    size_t pair_count) {
+    size_t pair_count,
+    bool* log_unchecked) {
+    // A log that is not there yet holds nothing, which is a complete answer rather than an
+    // unchecked one.
     if(!storage_file_exists(storage, SNIFFER_CARD_NONCE_LOG_PATH)) return;
 
     Stream* stream = buffered_file_stream_alloc(storage);
@@ -176,6 +179,7 @@ static void sniffer_card_nonce_log_mark_duplicates(
         }
     } else {
         FURI_LOG_W(TAG, "Cannot read %s, treating it as empty", SNIFFER_CARD_NONCE_LOG_PATH);
+        *log_unchecked = true;
     }
 
     furi_string_free(line);
@@ -212,13 +216,13 @@ static size_t sniffer_card_nonce_log_prepare(
     size_t count,
     SnifferCardNoncePair* pairs,
     SnifferCardNonceLogResult* result) {
+    memset(result, 0, sizeof(*result));
+
     const size_t pair_count =
         sniffer_card_nonce_log_collect(traces, count, pairs, &result->traces_unpaired);
 
-    sniffer_card_nonce_log_mark_duplicates(storage, pairs, pair_count);
+    sniffer_card_nonce_log_mark_duplicates(storage, pairs, pair_count, &result->log_unchecked);
 
-    result->pairs_written = 0;
-    result->pairs_duplicate = 0;
     for(size_t i = 0; i < pair_count; i++) {
         if(pairs[i].duplicate) {
             result->pairs_duplicate++;
@@ -258,7 +262,9 @@ bool sniffer_card_nonce_log_save(
         sniffer_card_nonce_log_prepare(storage, traces, count, pairs, result);
 
     Stream* stream = buffered_file_stream_alloc(storage);
+    FuriString* block = furi_string_alloc();
     FuriString* line = furi_string_alloc();
+    bool opened = false;
     bool saved = false;
 
     do {
@@ -269,27 +275,46 @@ bool sniffer_card_nonce_log_save(
             break;
         }
 
+        // The firmware's NFC app makes this directory before writing into it
+        // (`nfc_app.c` calls storage_simply_mkdir on NFC_APP_FOLDER). A Flipper that has never
+        // saved a card does not have it, and without this the open below fails for a reason the
+        // user cannot act on and the app could have fixed itself.
+        storage_simply_mkdir(storage, SNIFFER_CARD_NONCE_LOG_FOLDER);
+
         if(!buffered_file_stream_open(
                stream, SNIFFER_CARD_NONCE_LOG_PATH, FSAM_WRITE, FSOM_OPEN_APPEND)) {
             FURI_LOG_E(TAG, "Cannot open %s", SNIFFER_CARD_NONCE_LOG_PATH);
+            result->open_failed = true;
             break;
         }
+        opened = true;
 
-        size_t written = 0;
+        // Built whole, then written once. Writing a line at a time leaves a failure window per
+        // line, and a failure inside one lands mid-line - which matters because this file is
+        // shared with the firmware's NFC app and MFKey's loader does not validate what it reads:
+        // it takes any line starting with "Sec", stops at the first missing token, and uses the
+        // rest as zeroes. A half-written line would become permanent, well-formed-looking work
+        // that can never succeed.
+        furi_string_reset(block);
         for(size_t i = 0; i < pair_count; i++) {
             if(pairs[i].duplicate) continue;
 
             sniffer_card_nonce_log_format(&pairs[i], line);
-            if(stream_write_string(stream, line) != furi_string_size(line)) {
-                FURI_LOG_E(TAG, "Cannot write %s", SNIFFER_CARD_NONCE_LOG_PATH);
-                break;
-            }
-            written++;
+            furi_string_cat(block, line);
         }
 
-        if(written != result->pairs_written) {
-            // Say what actually reached the file, not what was meant to.
-            result->pairs_written = written;
+        if(stream_write_string(stream, block) != furi_string_size(block)) {
+            FURI_LOG_E(TAG, "Cannot write %s", SNIFFER_CARD_NONCE_LOG_PATH);
+            break;
+        }
+
+        // The stream caches about a kilobyte in RAM and only reaches the card when that fills,
+        // so up to eleven pairs none of this has touched the SD card yet. Without the sync, a
+        // full or absent card is discovered inside the close below - whose result used to be
+        // discarded, reporting "Saved" for nonces that never left RAM. The captures are gone by
+        // then: the card keeps them only until the next reader overwrites them.
+        if(!buffered_file_stream_sync(stream)) {
+            FURI_LOG_E(TAG, "Cannot flush %s", SNIFFER_CARD_NONCE_LOG_PATH);
             break;
         }
 
@@ -297,9 +322,21 @@ bool sniffer_card_nonce_log_save(
     } while(false);
 
     furi_string_free(line);
-    buffered_file_stream_close(stream);
+    furi_string_free(block);
+
+    // Part of the result, not cleanup: this is where the last of the data reaches the card.
+    if(!buffered_file_stream_close(stream) && opened && saved) {
+        FURI_LOG_E(TAG, "Cannot close %s", SNIFFER_CARD_NONCE_LOG_PATH);
+        saved = false;
+    }
+
     stream_free(stream);
     furi_record_close(RECORD_STORAGE);
+
+    if(!saved) {
+        // Nothing is known to have landed, so the screen must not claim any of it did.
+        result->pairs_written = 0;
+    }
 
     return saved;
 }

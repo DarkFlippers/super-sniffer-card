@@ -54,6 +54,11 @@ bool sniffer_trace_same_key(const SnifferTrace* a, const SnifferTrace* b) {
     furi_assert(a);
     furi_assert(b);
 
-    return a->key_type == b->key_type &&
+    // The card is part of the question. mfkey32 seeds the cipher with the UID, so two
+    // authentications made against different UIDs cannot be intersected however well their sector
+    // and key type match - the line would be arithmetically impossible and MFKey would spend
+    // minutes proving it. One read can hold captures from two UIDs: these cards keep older
+    // captures when a new one lands, so reprogramming between taps leaves both on the card.
+    return sniffer_trace_get_cuid(a) == sniffer_trace_get_cuid(b) && a->key_type == b->key_type &&
            sniffer_trace_get_sector(a) == sniffer_trace_get_sector(b);
 }

@@ -68,6 +68,17 @@ static void sniffer_card_app_scene_read_result_build_text(
         furi_string_cat_str(app->text, SNIFFER_CARD_LINE_BOLD "No pairs yet\n");
     }
 
+    if(app->read_truncated) {
+        // Captures were left on the card. Said before the unpaired advice, because the fix is
+        // the opposite one: read again rather than tap a reader again.
+        furi_string_cat_str(app->text, "Read cut short, read again\n");
+    }
+
+    if(pairs->log_unchecked) {
+        // The counts above were worked out without seeing the log, so "new" is a guess.
+        furi_string_cat_str(app->text, "Log unreadable, may repeat\n");
+    }
+
     if(pairs->traces_unpaired > 0) {
         // The one shortfall another tap on the reader fixes: a capture whose key nothing else
         // here shares cannot be cracked, however good it is.
@@ -107,6 +118,11 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
     widget_reset(app->widget);
 
     if(app->result != SnifferCardPollerResultSuccess) {
+        // Two reasons a tag is not one of these cards, and they call for different cards: one is
+        // not a Classic at all, the other is an ordinary Classic. Saying "does not answer an
+        // unauthenticated read" about an Ultralight is simply false - it does answer, which is
+        // why the SAK is tested first.
+        const bool not_classic = app->result == SnifferCardPollerResultNotClassic;
         widget_add_string_element(
             app->widget, 64, 12, AlignCenter, AlignTop, FontPrimary, "Not a sniffer card");
         widget_add_string_multiline_element(
@@ -116,7 +132,8 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
             AlignCenter,
             AlignTop,
             FontSecondary,
-            "This tag does not answer\nan unauthenticated read");
+            not_classic ? "This tag is not a MIFARE\nClassic. A sniffer card\nemulates one." :
+                          "This tag does not answer\nan unauthenticated read");
         widget_add_button_element(
             app->widget,
             GuiButtonTypeLeft,
@@ -124,8 +141,19 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
             sniffer_card_app_scene_read_result_button_callback,
             app);
     } else if(app->trace_count == 0) {
+        // A read that broke off has left captures on the card unread, and the usual advice -
+        // go and collect more - would overwrite them, since the card keeps captures only until
+        // the next reader writes over them. The app's own misreading would be what destroys the
+        // evidence, so a truncated read must never reach that sentence.
+        const bool truncated = app->read_truncated;
         widget_add_string_element(
-            app->widget, 64, 12, AlignCenter, AlignTop, FontPrimary, "Nothing captured");
+            app->widget,
+            64,
+            12,
+            AlignCenter,
+            AlignTop,
+            FontPrimary,
+            truncated ? "Read cut short" : "Nothing captured");
         widget_add_string_multiline_element(
             app->widget,
             64,
@@ -133,7 +161,9 @@ void sniffer_card_app_scene_read_result_on_enter(void* context) {
             AlignCenter,
             AlignTop,
             FontSecondary,
-            "Hold the card on a reader\n2-3 times, then read again");
+            truncated ?
+                "The card stopped answering.\nHold it still and read\nagain - do not re-tap." :
+                "Hold the card on a reader\n2-3 times, then read again");
         widget_add_button_element(
             app->widget,
             GuiButtonTypeLeft,

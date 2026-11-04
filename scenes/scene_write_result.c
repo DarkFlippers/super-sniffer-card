@@ -42,7 +42,15 @@ static const struct {
      "Not confirmed",
      "The card did not come back\nto be checked. It may still\nhave worked.",
      true},
-    {SnifferCardPollerResultWrongCard,
+    // The write never issues a trace read, so it cannot know whether the tag would answer one.
+    // All it has is the SAK, and that is what the text says.
+    {SnifferCardPollerResultNotClassic,
+     "Not a sniffer card",
+     "This tag is not a MIFARE\nClassic. A sniffer card\nemulates one.",
+     false},
+    // Produced by a trace read rather than a write, so it cannot land here - listed so the table
+    // covers the enum and the check below stays true.
+    {SnifferCardPollerResultNotSniffer,
      "Not a sniffer card",
      "This tag does not answer\nan unauthenticated read.",
      false},
@@ -50,16 +58,27 @@ static const struct {
      "Failed",
      "The card stopped answering\npart way through.",
      false},
+    // Never a real outcome - the screen is only entered once a session has a verdict - but
+    // present so the table covers every value and the static assert below can say so.
+    {SnifferCardPollerResultWaiting, "Failed", "No result from the card.", false},
 };
+
+// The table's whole point is that an outcome cannot go missing unnoticed, and until now the
+// lookup fell off the end into the last row instead - rendering an unlisted verdict as whatever
+// happened to be last. Checked here so a verdict added later fails the build rather than the user.
+_Static_assert(
+    COUNT_OF(sniffer_card_write_outcomes) == SnifferCardPollerResultNum,
+    "every SnifferCardPollerResult needs a row");
 
 void sniffer_card_app_scene_write_result_on_enter(void* context) {
     SnifferCardApp* app = context;
 
     size_t row = 0;
-    while(row < COUNT_OF(sniffer_card_write_outcomes) - 1 &&
+    while(row < COUNT_OF(sniffer_card_write_outcomes) &&
           sniffer_card_write_outcomes[row].result != app->result) {
         row++;
     }
+    furi_check(row < COUNT_OF(sniffer_card_write_outcomes));
 
     widget_reset(app->widget);
     widget_add_string_element(

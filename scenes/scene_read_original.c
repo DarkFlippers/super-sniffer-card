@@ -38,8 +38,10 @@ bool sniffer_card_app_scene_read_original_on_event(void* context, SceneManagerEv
     // Whatever answered is carried forward, including a tag that is not a Classic at all: the
     // next screen has to show the UID either way, and saying "that is not a Classic" next to the
     // UID it read is more use than refusing here with nothing on screen.
+    // Only the identity is taken. The session's verdict is not stored: an identity read reports
+    // Success for anything that activated, and app->result belongs to the read and write
+    // sessions whose screens actually branch on it.
     app->target = *sniffer_card_poller_get_identity(app->poller);
-    app->result = sniffer_card_poller_get_result(app->poller);
 
     notification_message(
         app->notifications,

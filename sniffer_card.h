@@ -67,10 +67,15 @@ uint32_t sniffer_trace_get_cuid(const SnifferTrace* trace);
 /** Sector a trace's block belongs to. */
 uint8_t sniffer_trace_get_sector(const SnifferTrace* trace);
 
-/** Whether two traces were made with the same key.
+/** Whether two traces could have been made with the same key.
  *
- * Same sector and same key type, not same block: one key covers every block in its sector, and a
- * reader walking a sector authenticates against whichever block it wants. Pairing on the block
- * instead throws away most usable pairs - Proxmark3 compares sectors here for the same reason.
+ * Same card, same sector, same key type. Not same block: one key covers every block in its
+ * sector, and a reader walking a sector authenticates against whichever block it wants, so
+ * pairing on the block throws away most usable pairs - Proxmark3 compares sectors here for the
+ * same reason.
+ *
+ * "Could have been": a reader may present several keys to one sector, the real one among decoys,
+ * so two traces passing this test still need not share a key. Which ones do is what mfkey32
+ * answers, not something that can be decided here.
  */
 bool sniffer_trace_same_key(const SnifferTrace* a, const SnifferTrace* b);

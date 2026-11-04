@@ -4,6 +4,8 @@
 #include <nfc/protocols/mf_classic/mf_classic.h>
 
 /** Where the NFC app keeps saved cards, and the extension it saves them under. */
+#define TAG "SnifferCard"
+
 #define SNIFFER_CARD_DUMP_FOLDER    EXT_PATH("nfc")
 #define SNIFFER_CARD_DUMP_EXTENSION ".nfc"
 
@@ -53,8 +55,18 @@ void sniffer_card_app_scene_load_dump_on_enter(void* context) {
     options.hide_dot_files = true;
 
     FuriString* path = furi_string_alloc_set(SNIFFER_CARD_DUMP_FOLDER);
-    const bool picked = dialog_file_browser_show(app->dialogs, path, path, &options) &&
-                        sniffer_card_app_load_identity(furi_string_get_cstr(path), &app->target);
+    bool picked = false;
+
+    // Choosing a file that turns out to be unusable is not the same as choosing no file, and
+    // collapsing the two into one silent exit leaves the user looking at the menu they just came
+    // from with nothing to explain why - so they pick the same file again.
+    if(dialog_file_browser_show(app->dialogs, path, path, &options)) {
+        picked = sniffer_card_app_load_identity(furi_string_get_cstr(path), &app->target);
+        if(!picked) {
+            FURI_LOG_E(TAG, "No usable UID in %s", furi_string_get_cstr(path));
+            dialog_message_show_storage_error(app->dialogs, "No UID in that file");
+        }
+    }
 
     furi_string_free(path);
 

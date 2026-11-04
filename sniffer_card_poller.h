@@ -26,9 +26,13 @@ typedef enum {
 typedef enum {
     SnifferCardPollerResultWaiting, /**< Nothing on the Flipper yet. */
     SnifferCardPollerResultSuccess,
-    /** A tag answered and it is not what this session needed - not a sniffer card for a trace
-     * read, or not a MIFARE Classic for an identity read. */
-    SnifferCardPollerResultWrongCard,
+    /** The tag presents no MIFARE Classic personality at all, so it cannot be one of these
+     * cards whatever else it is. An identity read never produces this: it reports whatever
+     * answered and lets the confirm screen judge the type. */
+    SnifferCardPollerResultNotClassic,
+    /** A Classic-looking tag that refuses an unauthenticated read, i.e. an ordinary Classic
+     * rather than a sniffer card. */
+    SnifferCardPollerResultNotSniffer,
     /** The sniffer card's UID is a different length from the one asked for. These cards are
      * physically a 4-byte or a 7-byte part and cannot be made into the other. */
     SnifferCardPollerResultUidLenMismatch,
@@ -37,6 +41,10 @@ typedef enum {
     /** The UID was written and the card did not come back at all, so nothing confirms it. */
     SnifferCardPollerResultWriteUnverified,
     SnifferCardPollerResultError, /**< The tag went away mid-session, or answered nonsense. */
+
+    /** Not a verdict: the count, so a table of outcomes can be checked against it at compile
+     * time rather than by whoever next remembers to look. */
+    SnifferCardPollerResultNum,
 } SnifferCardPollerResult;
 
 /** What a tag answered during activation. */
@@ -102,9 +110,10 @@ const SnifferCardIdentity* sniffer_card_poller_get_identity(const SnifferCardPol
 size_t
     sniffer_card_poller_get_traces(const SnifferCardPoller* instance, const SnifferTrace** traces);
 
-/** Slots that answered at all, captures or not.
+/** Whether the read stopped before the card ran out of slots.
  *
- * Separate from the trace count so the UI can tell "this is not a sniffer card" from "this is one,
- * and it has not been held against a reader yet".
+ * A read that broke off part way has left captures on the card unread, and the card keeps them
+ * only until a reader overwrites them - so the difference between this and an empty card is the
+ * difference between "read it again" and advice that destroys what is there.
  */
-size_t sniffer_card_poller_get_slots_read(const SnifferCardPoller* instance);
+bool sniffer_card_poller_read_was_truncated(const SnifferCardPoller* instance);
