@@ -12,7 +12,7 @@ static const struct {
 } sniffer_card_start_items[] = {
     {"Set Sniffer UID", SnifferCardAppSceneUidSource},
     {"Read Sniffer Card", SnifferCardAppSceneRead},
-    {"About", SnifferCardAppSceneInfo},
+    {"How to Use", SnifferCardAppSceneInfo},
 };
 
 static void sniffer_card_app_scene_start_callback(void* context, uint32_t index) {

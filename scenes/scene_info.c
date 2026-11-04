@@ -3,37 +3,48 @@
 // A macro rather than a `static const char*`, because clang-format reflows the continuation
 // lines of a long concatenated initializer to line up under the `=` and the screen text stops
 // being readable in the source.
-#define SNIFFER_CARD_INFO_TEXT           \
-    "A Super Sniffer card emulates\n"    \
-    "a MIFARE Classic and records\n"     \
-    "the authentications a reader\n"     \
-    "tries against it.\n"                \
-    "\n"                                 \
-    "Set the card's UID to the one\n"    \
-    "you want keys for, hold it on\n"    \
-    "the reader 2-3 times, then\n"       \
-    "read it here.\n"                    \
-    "\n"                                 \
-    "This app reads the captures and\n"  \
-    "appends them to the MFKey nonce\n"  \
-    "log. MFKey recovers the keys and\n" \
-    "writes them to the user\n"          \
-    "dictionary.\n"                      \
-    "\n"                                 \
-    "Two captures of one key are\n"      \
-    "needed to recover it, so tap the\n" \
-    "reader more than once.\n"           \
-    "\n"                                 \
-    "Supported: Gen2 cards, the ones\n"  \
-    "that answer a plain 30 xx read.\n"  \
-    "The Gen1 and Furui revisions are\n" \
-    "not read yet."
+//
+// Written as the job in order rather than as a description of the app. Someone opening this has
+// a card in one hand and no idea which of the two menu entries comes first, and that is the one
+// question worth answering on a 128x64 screen.
+#define SNIFFER_CARD_HOWTO_TEXT     \
+    "1. Set Sniffer UID\n"          \
+    "Give the sniffer card the\n"   \
+    "UID of the card you want\n"    \
+    "keys for - from a tag, a\n"    \
+    "saved dump, or typed in.\n"    \
+    "\n"                            \
+    "2. Hold it on the reader\n"    \
+    "At least twice. Each tap\n"    \
+    "records one login attempt,\n"  \
+    "and a key needs two of the\n"  \
+    "same sector to crack.\n"       \
+    "\n"                            \
+    "3. Read Sniffer Card\n"        \
+    "Back here, read it, Save.\n"   \
+    "\n"                            \
+    "4. Run MFKey\n"                \
+    "It does the cracking and\n"    \
+    "puts the keys in your user\n"  \
+    "dictionary, so the NFC app\n"  \
+    "can then read the original.\n" \
+    "No MFKey? qUnleashed can\n"    \
+    "do it on a PC instead.\n"      \
+    "\n"                            \
+    "Reading twice is safe: a\n"    \
+    "pair already in the log is\n"  \
+    "skipped, not added again.\n"   \
+    "\n"                            \
+    "Works with Gen2 cards, the\n"  \
+    "ones answering a plain\n"      \
+    "30 xx read. Gen1 and Furui\n"  \
+    "are not supported yet."
 
 void sniffer_card_app_scene_info_on_enter(void* context) {
     SnifferCardApp* app = context;
 
     widget_reset(app->widget);
-    widget_add_text_scroll_element(app->widget, 0, 0, 128, 64, SNIFFER_CARD_INFO_TEXT);
+    widget_add_text_scroll_element(app->widget, 0, 0, 128, 64, SNIFFER_CARD_HOWTO_TEXT);
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewWidget);
 }

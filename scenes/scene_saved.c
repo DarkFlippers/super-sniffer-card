@@ -1,46 +1,60 @@
 #include "../sniffer_card_app.h"
 
+static void sniffer_card_app_scene_saved_button_callback(
+    GuiButtonType type,
+    InputType input,
+    void* context) {
+    SnifferCardApp* app = context;
+
+    if(input != InputTypeShort || type != GuiButtonTypeRight) return;
+
+    view_dispatcher_send_custom_event(app->view_dispatcher, SnifferCardAppCustomEventNext);
+}
+
 void sniffer_card_app_scene_saved_on_enter(void* context) {
     SnifferCardApp* app = context;
 
     SnifferCardNonceLogResult result = {0};
     const bool saved = sniffer_card_nonce_log_save(app->traces, app->trace_count, &result);
+    const bool have_mfkey = sniffer_card_app_mfkey_installed();
 
+    const char* header;
     widget_reset(app->widget);
 
-    if(saved && result.pairs_written == 0) {
+    if(!saved) {
+        header = "Not saved";
+        furi_string_printf(app->text, "Could not write\n" SNIFFER_CARD_NONCE_LOG_PATH);
+        notification_message(app->notifications, &sequence_error);
+
+    } else if(result.pairs_written == 0) {
         // Everything this card holds is already waiting for MFKey. Said plainly, because these
         // cards keep their captures until a reader overwrites them, so reading one twice is easy
         // to do by accident and would otherwise look like a failure.
+        header = "Already saved";
         furi_string_printf(
             app->text,
-            "%u pair%s already in\nthe MFKey nonce log.\n\nNothing new to add.",
+            "%u pair%s already in the\nMFKey nonce log. Nothing\nnew to add.",
             result.pairs_duplicate,
             result.pairs_duplicate == 1 ? "" : "s");
-
-        widget_add_string_element(
-            app->widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Already saved");
         notification_message(app->notifications, &sequence_success);
-    } else if(saved) {
+
+    } else {
+        header = "Saved";
         furi_string_printf(
             app->text,
-            // Four lines, which is what fits on a screen with no button row; a fifth runs off the
-            // bottom. The time is named because every combination of captures is written, so the
-            // count can be high and MFKey spends minutes on each one.
-            "%u pair%s added to the\nMFKey nonce log.\n\nOpen MFKey: minutes each.",
+            "%u pair%s added to the\nMFKey nonce log.\n",
             result.pairs_written,
             result.pairs_written == 1 ? "" : "s");
-
-        widget_add_string_element(app->widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Saved");
+        // Where the keys actually come from. With MFKey installed that is a button; without it,
+        // the only useful thing to say is where to get one, because this app deliberately does
+        // not do the recovery itself.
+        furi_string_cat_str(
+            app->text,
+            have_mfkey ? "Each takes minutes." : "Recover with the MFKey\napp, or qUnleashed.");
         notification_message(app->notifications, &sequence_success);
-    } else {
-        furi_string_printf(app->text, "Could not write\n" SNIFFER_CARD_NONCE_LOG_PATH);
-
-        widget_add_string_element(
-            app->widget, 64, 4, AlignCenter, AlignTop, FontPrimary, "Not saved");
-        notification_message(app->notifications, &sequence_error);
     }
 
+    widget_add_string_element(app->widget, 64, 2, AlignCenter, AlignTop, FontPrimary, header);
     widget_add_string_multiline_element(
         app->widget,
         64,
@@ -49,6 +63,17 @@ void sniffer_card_app_scene_saved_on_enter(void* context) {
         AlignTop,
         FontSecondary,
         furi_string_get_cstr(app->text));
+
+    // Offered whenever there is anything in the log worth running it on, which includes the case
+    // where this read added nothing because the pairs were already there.
+    if(have_mfkey && saved) {
+        widget_add_button_element(
+            app->widget,
+            GuiButtonTypeRight,
+            "Run MFKey",
+            sniffer_card_app_scene_saved_button_callback,
+            app);
+    }
 
     view_dispatcher_switch_to_view(app->view_dispatcher, SnifferCardAppViewWidget);
 }
@@ -62,6 +87,11 @@ bool sniffer_card_app_scene_saved_on_event(void* context, SceneManagerEvent even
     if(event.type == SceneManagerEventTypeBack) {
         scene_manager_search_and_switch_to_previous_scene(
             app->scene_manager, SnifferCardAppSceneStart);
+        return true;
+    }
+
+    if(event.type == SceneManagerEventTypeCustom && event.event == SnifferCardAppCustomEventNext) {
+        sniffer_card_app_run_mfkey(app);
         return true;
     }
 

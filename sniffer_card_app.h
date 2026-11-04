@@ -13,6 +13,7 @@
 #include <gui/modules/submenu.h>
 #include <gui/modules/widget.h>
 #include <dialogs/dialogs.h>
+#include <loader/loader.h>
 #include <notification/notification_messages.h>
 #include <storage/storage.h>
 
@@ -41,6 +42,14 @@
  * costs a line that is still there, still correct, and invisible.
  */
 #define SNIFFER_CARD_TEXT_LINES 3
+
+/** Where the MFKey app lives when it is installed, spelled as the firmware's NFC app spells it
+ * (`NFC_MFKEY32_APP_PATH` in `applications/main/nfc/nfc_app_i.h`).
+ *
+ * Checked rather than assumed: MFKey is a separate app and plenty of Flippers do not have it, in
+ * which case offering to run it would be a button that fails.
+ */
+#define SNIFFER_CARD_MFKEY_PATH EXT_PATH("apps/NFC/mfkey.fap")
 
 /** The longest UID these cards come in, and so the longest one that can be set on one. */
 #define SNIFFER_CARD_UID_MAX 7
@@ -105,6 +114,19 @@ typedef enum {
 
 /** Take the result of a finished session out of the poller and into the app. */
 void sniffer_card_app_take_result(SnifferCardApp* app);
+
+/** Whether the MFKey app is installed, and so whether running it can be offered. */
+bool sniffer_card_app_mfkey_installed(void);
+
+/** Hand over to MFKey and quit.
+ *
+ * The nonces are in a file by now, so there is nothing to pass along and nothing to come back
+ * for - MFKey writes what it recovers into the user dictionary, and the next useful step is the
+ * NFC app rather than this one. The firmware's NFC app re-enqueues itself here; this does not,
+ * because a recovery run takes minutes and returning to a stale result screen afterwards would
+ * be a surprise rather than a convenience.
+ */
+void sniffer_card_app_run_mfkey(SnifferCardApp* app);
 
 /** Write a UID out as spaced hex bytes, the way the NFC app shows one. */
 void sniffer_card_app_uid_text(const uint8_t* uid, size_t uid_len, FuriString* text);

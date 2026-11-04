@@ -27,6 +27,25 @@ void sniffer_card_app_take_result(SnifferCardApp* app) {
     app->result = sniffer_card_poller_get_result(app->poller);
 }
 
+bool sniffer_card_app_mfkey_installed(void) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    const bool installed = storage_common_exists(storage, SNIFFER_CARD_MFKEY_PATH);
+    furi_record_close(RECORD_STORAGE);
+
+    return installed;
+}
+
+void sniffer_card_app_run_mfkey(SnifferCardApp* app) {
+    furi_assert(app);
+
+    Loader* loader = furi_record_open(RECORD_LOADER);
+    loader_enqueue_launch(loader, SNIFFER_CARD_MFKEY_PATH, NULL, LoaderDeferredLaunchFlagGui);
+    furi_record_close(RECORD_LOADER);
+
+    // The loader starts the queued app once this one is gone, so leaving is part of launching.
+    view_dispatcher_stop(app->view_dispatcher);
+}
+
 void sniffer_card_app_uid_text(const uint8_t* uid, size_t uid_len, FuriString* text) {
     furi_assert(uid);
     furi_assert(text);
