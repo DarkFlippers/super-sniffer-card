@@ -12,6 +12,7 @@
 #include <gui/modules/popup.h>
 #include <gui/modules/submenu.h>
 #include <gui/modules/widget.h>
+#include <dialogs/dialogs.h>
 #include <notification/notification_messages.h>
 #include <storage/storage.h>
 
@@ -46,6 +47,7 @@
 
 typedef struct {
     Gui* gui;
+    DialogsApp* dialogs;
     NotificationApp* notifications;
     SceneManager* scene_manager;
     ViewDispatcher* view_dispatcher;

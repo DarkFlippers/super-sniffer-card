@@ -28,10 +28,9 @@ static const struct {
     bool can_continue;
 } sniffer_card_write_outcomes[] = {
     {SnifferCardPollerResultSuccess, "UID set", NULL, true},
-    {SnifferCardPollerResultUidLenMismatch,
-     "Wrong card",
-     "That sniffer card's UID is\na different length. Use a\n4- or 7-byte card to match.",
-     false},
+    // Text built at the screen rather than stored here, because the useful thing to say is both
+    // lengths - which card you are holding and which UID you picked. See the NULL case below.
+    {SnifferCardPollerResultUidLenMismatch, "Wrong sniffer card", NULL, false},
     {SnifferCardPollerResultWriteMismatch,
      "Did not take",
      "The card still answers as\nsomething else. Try again,\nholding it still.",
@@ -82,13 +81,26 @@ void sniffer_card_app_scene_write_result_on_enter(void* context) {
             FontSecondary,
             sniffer_card_write_outcomes[row].text);
     } else {
-        // On success the useful thing to show is the UID the card now answers as, read back off
-        // it rather than echoed from what was asked for.
         const SnifferCardIdentity* identity = sniffer_card_poller_get_identity(app->poller);
-        sniffer_card_app_uid_text(identity->uid, identity->uid_len, app->text);
-        // Three lines total, no blank one: a fourth would start below SNIFFER_CARD_BUTTON_ROW_Y
-        // and be painted over by the buttons.
-        furi_string_cat_str(app->text, "\nThe sniffer card now\nanswers as the original");
+
+        if(app->result == SnifferCardPollerResultUidLenMismatch) {
+            // Both lengths, because either one alone leaves the user guessing which to change.
+            // These cards are a 4-byte or a 7-byte part and cannot be made into the other, so the
+            // answer is always to reach for a different card or a different UID.
+            furi_string_printf(
+                app->text,
+                "This card takes a %u-byte\nUID. The one you chose is\n%u bytes.",
+                identity->uid_len,
+                app->target.uid_len);
+        } else {
+            // On success the useful thing to show is the UID the card now answers as, read back
+            // off it rather than echoed from what was asked for.
+            sniffer_card_app_uid_text(identity->uid, identity->uid_len, app->text);
+            // Three lines total, no blank one: a fourth would start below
+            // SNIFFER_CARD_BUTTON_ROW_Y and be painted over by the buttons.
+            furi_string_cat_str(app->text, "\nThe sniffer card now\nanswers as the original");
+        }
+
         widget_add_string_multiline_element(
             app->widget,
             64,

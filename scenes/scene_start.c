@@ -10,8 +10,7 @@ static const struct {
     const char* label;
     SnifferCardAppScene scene;
 } sniffer_card_start_items[] = {
-    {"Set UID From Card", SnifferCardAppSceneReadOriginal},
-    {"Set UID Manually", SnifferCardAppSceneUidLength},
+    {"Set Sniffer UID", SnifferCardAppSceneUidSource},
     {"Read Sniffer Card", SnifferCardAppSceneRead},
     {"About", SnifferCardAppSceneInfo},
 };

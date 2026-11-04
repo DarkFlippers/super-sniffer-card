@@ -41,6 +41,7 @@ static SnifferCardApp* sniffer_card_app_alloc(void) {
     SnifferCardApp* app = malloc(sizeof(SnifferCardApp));
 
     app->gui = furi_record_open(RECORD_GUI);
+    app->dialogs = furi_record_open(RECORD_DIALOGS);
     app->notifications = furi_record_open(RECORD_NOTIFICATION);
 
     app->scene_manager = scene_manager_alloc(&sniffer_card_app_scene_handlers, app);
@@ -102,6 +103,7 @@ static void sniffer_card_app_free(SnifferCardApp* app) {
     furi_string_free(app->text);
 
     furi_record_close(RECORD_NOTIFICATION);
+    furi_record_close(RECORD_DIALOGS);
     furi_record_close(RECORD_GUI);
 
     free(app);

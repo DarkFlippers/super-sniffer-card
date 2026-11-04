@@ -21,38 +21,50 @@
  */
 static const uint8_t sniffer_card_uid_knock[] = {0xF3, 0x2A, 0xBD, 0xEF, 0x01};
 
-/** UID bytes the vendor app sends, whatever the card's own UID length.
+/** UID bytes the card expects, whatever its own UID length.
  *
- * It always sends seven, zero-padding a 4-byte UID, which makes the last three commands `30 00` -
- * a read of page 0 by opcode.
+ * Always seven, zero-padding a 4-byte UID, which makes the last three commands `30 00` - a read
+ * of page 0 by opcode. Confirmed on the wire: a sniff of the vendor app writing a 4-byte UID
+ * sends `30 5D`, `30 0D`, `30 19`, `30 65` and then `30 00` three times.
  */
 #define SNIFFER_CARD_UID_WRITE_BYTES 7
 
-/** Ways of performing the knock, tried in turn until the card answers as its new self.
+/** HLTA, which is how the card is told to keep the UID it was just given.
  *
- * The sequence itself is not in doubt - it came out of the vendor app, and Proxmark3 confirms the
- * card is a Super Gen2, for which it has no UID write of its own to compare against. What is in
- * doubt is how it has to be delivered. Android spends milliseconds of JVM overhead between
- * transceive calls; the Flipper sends frames as fast as the field allows, which a card writing
- * EEPROM between bytes could be overrun by. And the seven-byte padding on a 4-byte card is the
- * vendor app's choice, not a documented requirement.
+ * Not a guess and not an ordinary halt. A sniff of the vendor app writing a UID shows it sending
+ * HLTA straight after the seventh byte, and the card *answering* it - which an ISO14443-3A tag
+ * never does to a halt. The answer is the same 16-byte frame every command in this mode returns,
+ * except that its leading status byte goes from `11` to `22`. The next WUPA then gets nothing at
+ * all while the card writes, and the one after that comes back under the new UID.
  *
- * Trying them in one session rather than one per build is what makes each tap of the card worth
- * something: the log names the variant that took.
+ * This is the step that was missing. Without it the knock and all seven bytes are accepted and
+ * acknowledged, and then dropping the field discards the lot - which is why twelve commands could
+ * succeed and change nothing. Android sends it implicitly when the app closes the tag connection.
  */
-typedef struct {
-    const char* name;
-    /** Bytes of UID to send; 0 means send exactly the card's own UID length. */
-    uint8_t uid_bytes;
-    /** Pause after each command, in milliseconds. */
-    uint32_t gap_ms;
-} SnifferCardWriteVariant;
+#define SNIFFER_CARD_CMD_HALT_0 (0x50)
+#define SNIFFER_CARD_CMD_HALT_1 (0x00)
 
-static const SnifferCardWriteVariant sniffer_card_write_variants[] = {
-    {"7 bytes, no gap", SNIFFER_CARD_UID_WRITE_BYTES, 0},
-    {"7 bytes, 20ms gap", SNIFFER_CARD_UID_WRITE_BYTES, 20},
-    {"UID length, 20ms gap", 0, 20},
-};
+/** Status byte the card answers a command with while it is taking UID bytes. */
+#define SNIFFER_CARD_STATUS_ARMED (0x11)
+
+/** Status byte the card answers the committing HLTA with. */
+#define SNIFFER_CARD_STATUS_COMMITTED (0x22)
+
+/** Pause between commands of the write sequence.
+ *
+ * The vendor app leaves about 9 ms between frames, which is JVM overhead rather than intent - a
+ * run with no gap at all was acknowledged just the same. Kept small and deliberate rather than
+ * sending as fast as the field allows, because nothing here is time-critical and the card is
+ * writing memory at the end of it.
+ */
+#define SNIFFER_CARD_WRITE_GAP_MS (10)
+
+/** Pause before the committing HLTA, and after it while the card writes.
+ *
+ * The sniff shows about 136 ms of quiet before the vendor app's HLTA, and the WUPA straight after
+ * it going unanswered.
+ */
+#define SNIFFER_CARD_COMMIT_MS (150)
 
 #define SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE (64U)
 #define SNIFFER_CARD_POLLER_MAX_FWT         (150000U)
@@ -109,8 +121,6 @@ struct SnifferCardPoller {
     uint8_t uid_to_write[SNIFFER_CARD_UID_WRITE_BYTES];
     size_t uid_to_write_len;
     SnifferCardWriteStep write_step;
-    /** Which of sniffer_card_write_variants is being tried. */
-    size_t write_variant;
 
     SnifferCardPollerResult result;
     SnifferCardIdentity identity;
@@ -157,7 +167,6 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     instance->context = NULL;
     instance->uid_to_write_len = 0;
     instance->write_step = SnifferCardWriteStepWrite;
-    instance->write_variant = 0;
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
@@ -203,17 +212,29 @@ static void sniffer_card_log_bytes(const char* label, const uint8_t* data, size_
  *
  * Logged command and answer both: these cards are documented by two sources that disagree, and
  * the only way to tell which sequence a particular one speaks is to see what it says back.
+ *
+ * @param allow_wrong_crc accept a frame whose CRC did not check out. For the write sequence,
+ *        where the answers are not read and the UID is verified off the card afterwards, a bad
+ *        CRC is not worth abandoning a half-finished write over - one was seen on a `30 F3` in
+ *        normal use, and the retry that followed succeeded. For a trace read it is fatal, because
+ *        the bytes are the point. nfc_magic tolerates the same error in its Gen2 detection.
  */
 static bool sniffer_card_poller_read_cmd(
     SnifferCardPoller* instance,
     Iso14443_3aPoller* iso3_poller,
-    uint8_t arg) {
+    uint8_t arg,
+    bool allow_wrong_crc) {
     bit_buffer_reset(instance->tx_buffer);
     bit_buffer_append_byte(instance->tx_buffer, SNIFFER_CARD_CMD_READ);
     bit_buffer_append_byte(instance->tx_buffer, arg);
 
     const Iso14443_3aError error = iso14443_3a_poller_send_standard_frame(
         iso3_poller, instance->tx_buffer, instance->rx_buffer, SNIFFER_CARD_POLLER_MAX_FWT);
+
+    if(error == Iso14443_3aErrorWrongCrc && allow_wrong_crc) {
+        FURI_LOG_W(TAG, "30 %02X -> bad CRC, carrying on", arg);
+        return true;
+    }
 
     if(error != Iso14443_3aErrorNone) {
         FURI_LOG_D(TAG, "30 %02X -> error %d", arg, error);
@@ -264,7 +285,7 @@ static SnifferCardPollerResult
     instance->slots_read = 0;
 
     for(uint8_t page = 0; page < SNIFFER_CARD_TRACE_SLOTS; page++) {
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, page)) break;
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, page, false)) break;
         if(bit_buffer_get_size_bytes(instance->rx_buffer) != SNIFFER_CARD_TRACE_SIZE) break;
 
         uint8_t raw[SNIFFER_CARD_TRACE_SIZE];
@@ -309,29 +330,54 @@ static SnifferCardPollerResult
         return SnifferCardPollerResultUidLenMismatch;
     }
 
-    const SnifferCardWriteVariant* variant = &sniffer_card_write_variants[instance->write_variant];
-    const size_t uid_bytes = variant->uid_bytes ? variant->uid_bytes : instance->uid_to_write_len;
-
     sniffer_card_log_bytes(
         "sniffer UID before:", instance->identity.uid, instance->identity.uid_len);
-    sniffer_card_log_bytes("UID to write:", instance->uid_to_write, uid_bytes);
-    FURI_LOG_I(TAG, "SAK %02X, variant: %s", instance->identity.sak, variant->name);
+    sniffer_card_log_bytes("UID to write:", instance->uid_to_write, SNIFFER_CARD_UID_WRITE_BYTES);
+    FURI_LOG_I(TAG, "SAK %02X", instance->identity.sak);
 
     for(size_t i = 0; i < COUNT_OF(sniffer_card_uid_knock); i++) {
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i])) {
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i], true)) {
             FURI_LOG_E(TAG, "Knock step %zu failed", i);
             return SnifferCardPollerResultError;
         }
-        if(variant->gap_ms) furi_delay_ms(variant->gap_ms);
+        furi_delay_ms(SNIFFER_CARD_WRITE_GAP_MS);
     }
 
-    for(size_t i = 0; i < uid_bytes; i++) {
-        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i])) {
+    for(size_t i = 0; i < SNIFFER_CARD_UID_WRITE_BYTES; i++) {
+        if(!sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i], true)) {
             FURI_LOG_E(TAG, "UID byte %zu failed", i);
             return SnifferCardPollerResultError;
         }
-        if(variant->gap_ms) furi_delay_ms(variant->gap_ms);
+        furi_delay_ms(SNIFFER_CARD_WRITE_GAP_MS);
     }
+
+    furi_delay_ms(SNIFFER_CARD_COMMIT_MS);
+
+    // The commit. Sent as an ordinary frame rather than through
+    // iso14443_3a_poller_halt(), which discards the answer - and the answer is the only thing
+    // that distinguishes a card that took the UID from one that ignored the whole exchange.
+    bit_buffer_reset(instance->tx_buffer);
+    bit_buffer_append_byte(instance->tx_buffer, SNIFFER_CARD_CMD_HALT_0);
+    bit_buffer_append_byte(instance->tx_buffer, SNIFFER_CARD_CMD_HALT_1);
+
+    const Iso14443_3aError error = iso14443_3a_poller_send_standard_frame(
+        iso3_poller, instance->tx_buffer, instance->rx_buffer, SNIFFER_CARD_POLLER_MAX_FWT);
+    if(error != Iso14443_3aErrorNone && error != Iso14443_3aErrorWrongCrc) {
+        // An ordinary tag answers a halt with silence, so a timeout here says this card does not
+        // treat HLTA as a commit - which is as much as can be concluded without it.
+        FURI_LOG_E(TAG, "No answer to the committing halt: %d", error);
+        return SnifferCardPollerResultError;
+    }
+
+    const uint8_t status = bit_buffer_get_byte(instance->rx_buffer, 0);
+    FURI_LOG_I(TAG, "halt answered, status %02X", status);
+    if(status != SNIFFER_CARD_STATUS_COMMITTED) {
+        FURI_LOG_E(TAG, "expected %02X from the commit", SNIFFER_CARD_STATUS_COMMITTED);
+        return SnifferCardPollerResultError;
+    }
+
+    // The card writes its memory now and answers nothing while it does.
+    furi_delay_ms(SNIFFER_CARD_COMMIT_MS);
 
     return SnifferCardPollerResultSuccess;
 }
@@ -346,15 +392,11 @@ static SnifferCardPollerResult sniffer_card_poller_verify_uid(SnifferCardPoller*
 
     if(after.uid_len != instance->uid_to_write_len ||
        memcmp(after.uid, instance->uid_to_write, after.uid_len) != 0) {
-        FURI_LOG_E(
-            TAG,
-            "variant '%s' did not take",
-            sniffer_card_write_variants[instance->write_variant].name);
+        FURI_LOG_E(TAG, "UID write did not take");
         return SnifferCardPollerResultWriteMismatch;
     }
 
-    FURI_LOG_I(
-        TAG, "variant '%s' took", sniffer_card_write_variants[instance->write_variant].name);
+    FURI_LOG_I(TAG, "UID write took");
 
     return SnifferCardPollerResultSuccess;
 }
@@ -388,16 +430,6 @@ static NfcCommand sniffer_card_poller_nfc_callback(NfcGenericEvent event, void* 
     if(instance->mode == SnifferCardPollerModeWriteUid &&
        instance->write_step == SnifferCardWriteStepVerify) {
         instance->result = sniffer_card_poller_verify_uid(instance);
-
-        // A variant that did not take is not the end of the session while another is untried:
-        // the card is still on the Flipper and has just been power-cycled, which is exactly the
-        // state the next variant wants to start from.
-        if(instance->result == SnifferCardPollerResultWriteMismatch &&
-           instance->write_variant + 1 < COUNT_OF(sniffer_card_write_variants)) {
-            instance->write_variant++;
-            instance->write_step = SnifferCardWriteStepWrite;
-            return NfcCommandReset;
-        }
 
         instance->callback(instance->context);
         return NfcCommandStop;
@@ -442,7 +474,6 @@ void sniffer_card_poller_start(
     instance->callback = callback;
     instance->context = context;
     instance->write_step = SnifferCardWriteStepWrite;
-    instance->write_variant = 0;
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
