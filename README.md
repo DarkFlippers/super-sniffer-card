@@ -14,6 +14,8 @@ The attack it enables is mfkey32: two authentications made with the same key, ca
 (nt, nr, ar), are enough to recover that key. The card does the capturing; something else has to
 do the arithmetic.
 
+![Main menu](screenshots/menu.png)
+
 ## How to use it
 
 Two menu entries, not one wizard - the card spends the middle of the job on a reader, away from
@@ -21,10 +23,18 @@ the Flipper, so there is nothing to walk through in between. One UID, many reade
 
 **Set Sniffer UID**
 
+The UID can come from a tag, from a dump you saved earlier, or typed in by hand - the card whose
+keys you want is not always the one in reach.
+
+![Where the UID comes from](screenshots/uid-source.png)
+
 1. Hold the card you want keys for against the Flipper. The app reads its UID and size, and names
-   the UID length so you know which sniffer card will take it.
+   the UID length so you know which sniffer card will take it - these cards are physically a
+   4-byte or a 7-byte part and will refuse the other.
 2. Hold the **sniffer** card against the Flipper. Its UID is set to the original's, then read back
    off the card to confirm it took.
+
+![Confirming the UID to write](screenshots/confirm-uid.png)
 
 Then take the sniffer card to the reader and hold it there at least twice. Each tap records one
 authentication, and recovering a key needs two of the same sector. Come back whenever.
@@ -103,6 +113,21 @@ An unused slot is recognised by its contents, not its index: the command byte ha
 reader would send, and a slot that captured nothing leaves `nr` and `ar` zero. The vendor app
 reads eight slots, Proxmark3 reads seven, and on the card the vendor app ships test data for, the
 eighth slot holds the card's own UID and twelve zero bytes.
+
+## Screenshots
+
+Captured with `tools/flipshot.py`, which drives the Flipper over its protobuf RPC: the firmware
+has no screenshot command, so this asks for the screen stream the way qFlipper does and can also
+inject key presses, which means the shots can be regenerated after a UI change rather than
+re-taken by hand.
+
+```
+python tools/flipshot.py COM12 screenshots menu "uid-source:OK" "confirm-uid:OK"
+```
+
+Each argument is a filename, optionally followed by the keys to press first.
+
+![How to Use](screenshots/how-to-use.png)
 
 ## Credits
 
