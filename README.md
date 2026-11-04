@@ -43,6 +43,13 @@ authentication, and recovering a key needs two of the same sector. Come back whe
 
 3. Hold the sniffer card against the Flipper. The app lists what it captured, and says how much of
    it is new.
+
+![What the card captured](screenshots/read-result.png)
+
+Each row is one authentication the reader attempted: sector, key type, and the tag nonce. The
+nonce is there because it is the only thing that tells two captures apart - a reader working one
+sector produces rows identical in everything else, and a reader trying several keys against that
+sector produces them with different keys behind them.
 4. Press **Save**. The new pairs are appended to `/ext/nfc/.mfkey32.log`.
 5. Open the **MFKey** app and let it run. Keys it recovers go into the user dictionary, so the
    Flipper's NFC app can then read the original card.
