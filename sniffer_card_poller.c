@@ -21,14 +21,38 @@
  */
 static const uint8_t sniffer_card_uid_knock[] = {0xF3, 0x2A, 0xBD, 0xEF, 0x01};
 
-/** UID bytes the knock expects, whatever the card's own UID length.
+/** UID bytes the vendor app sends, whatever the card's own UID length.
  *
- * The vendor app always sends seven, zero-padding a 4-byte UID, which makes the last three
- * commands `30 00` - a read of page 0 by opcode. Mirrored rather than shortened: seven is what is
- * known to work on real cards, and a four-command variant is a guess. It is also why a write is
- * read back before being called a success.
+ * It always sends seven, zero-padding a 4-byte UID, which makes the last three commands `30 00` -
+ * a read of page 0 by opcode.
  */
 #define SNIFFER_CARD_UID_WRITE_BYTES 7
+
+/** Ways of performing the knock, tried in turn until the card answers as its new self.
+ *
+ * The sequence itself is not in doubt - it came out of the vendor app, and Proxmark3 confirms the
+ * card is a Super Gen2, for which it has no UID write of its own to compare against. What is in
+ * doubt is how it has to be delivered. Android spends milliseconds of JVM overhead between
+ * transceive calls; the Flipper sends frames as fast as the field allows, which a card writing
+ * EEPROM between bytes could be overrun by. And the seven-byte padding on a 4-byte card is the
+ * vendor app's choice, not a documented requirement.
+ *
+ * Trying them in one session rather than one per build is what makes each tap of the card worth
+ * something: the log names the variant that took.
+ */
+typedef struct {
+    const char* name;
+    /** Bytes of UID to send; 0 means send exactly the card's own UID length. */
+    uint8_t uid_bytes;
+    /** Pause after each command, in milliseconds. */
+    uint32_t gap_ms;
+} SnifferCardWriteVariant;
+
+static const SnifferCardWriteVariant sniffer_card_write_variants[] = {
+    {"7 bytes, no gap", SNIFFER_CARD_UID_WRITE_BYTES, 0},
+    {"7 bytes, 20ms gap", SNIFFER_CARD_UID_WRITE_BYTES, 20},
+    {"UID length, 20ms gap", 0, 20},
+};
 
 #define SNIFFER_CARD_POLLER_MAX_BUFFER_SIZE (64U)
 #define SNIFFER_CARD_POLLER_MAX_FWT         (150000U)
@@ -85,6 +109,8 @@ struct SnifferCardPoller {
     uint8_t uid_to_write[SNIFFER_CARD_UID_WRITE_BYTES];
     size_t uid_to_write_len;
     SnifferCardWriteStep write_step;
+    /** Which of sniffer_card_write_variants is being tried. */
+    size_t write_variant;
 
     SnifferCardPollerResult result;
     SnifferCardIdentity identity;
@@ -131,6 +157,7 @@ SnifferCardPoller* sniffer_card_poller_alloc(Nfc* nfc) {
     instance->context = NULL;
     instance->uid_to_write_len = 0;
     instance->write_step = SnifferCardWriteStepWrite;
+    instance->write_variant = 0;
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
@@ -282,23 +309,28 @@ static SnifferCardPollerResult
         return SnifferCardPollerResultUidLenMismatch;
     }
 
+    const SnifferCardWriteVariant* variant = &sniffer_card_write_variants[instance->write_variant];
+    const size_t uid_bytes = variant->uid_bytes ? variant->uid_bytes : instance->uid_to_write_len;
+
     sniffer_card_log_bytes(
         "sniffer UID before:", instance->identity.uid, instance->identity.uid_len);
-    sniffer_card_log_bytes("UID to write:", instance->uid_to_write, SNIFFER_CARD_UID_WRITE_BYTES);
-    FURI_LOG_I(TAG, "SAK %02X", instance->identity.sak);
+    sniffer_card_log_bytes("UID to write:", instance->uid_to_write, uid_bytes);
+    FURI_LOG_I(TAG, "SAK %02X, variant: %s", instance->identity.sak, variant->name);
 
     for(size_t i = 0; i < COUNT_OF(sniffer_card_uid_knock); i++) {
         if(!sniffer_card_poller_read_cmd(instance, iso3_poller, sniffer_card_uid_knock[i])) {
             FURI_LOG_E(TAG, "Knock step %zu failed", i);
             return SnifferCardPollerResultError;
         }
+        if(variant->gap_ms) furi_delay_ms(variant->gap_ms);
     }
 
-    for(size_t i = 0; i < SNIFFER_CARD_UID_WRITE_BYTES; i++) {
+    for(size_t i = 0; i < uid_bytes; i++) {
         if(!sniffer_card_poller_read_cmd(instance, iso3_poller, instance->uid_to_write[i])) {
             FURI_LOG_E(TAG, "UID byte %zu failed", i);
             return SnifferCardPollerResultError;
         }
+        if(variant->gap_ms) furi_delay_ms(variant->gap_ms);
     }
 
     return SnifferCardPollerResultSuccess;
@@ -314,9 +346,15 @@ static SnifferCardPollerResult sniffer_card_poller_verify_uid(SnifferCardPoller*
 
     if(after.uid_len != instance->uid_to_write_len ||
        memcmp(after.uid, instance->uid_to_write, after.uid_len) != 0) {
-        FURI_LOG_E(TAG, "UID write did not take");
+        FURI_LOG_E(
+            TAG,
+            "variant '%s' did not take",
+            sniffer_card_write_variants[instance->write_variant].name);
         return SnifferCardPollerResultWriteMismatch;
     }
+
+    FURI_LOG_I(
+        TAG, "variant '%s' took", sniffer_card_write_variants[instance->write_variant].name);
 
     return SnifferCardPollerResultSuccess;
 }
@@ -350,6 +388,17 @@ static NfcCommand sniffer_card_poller_nfc_callback(NfcGenericEvent event, void* 
     if(instance->mode == SnifferCardPollerModeWriteUid &&
        instance->write_step == SnifferCardWriteStepVerify) {
         instance->result = sniffer_card_poller_verify_uid(instance);
+
+        // A variant that did not take is not the end of the session while another is untried:
+        // the card is still on the Flipper and has just been power-cycled, which is exactly the
+        // state the next variant wants to start from.
+        if(instance->result == SnifferCardPollerResultWriteMismatch &&
+           instance->write_variant + 1 < COUNT_OF(sniffer_card_write_variants)) {
+            instance->write_variant++;
+            instance->write_step = SnifferCardWriteStepWrite;
+            return NfcCommandReset;
+        }
+
         instance->callback(instance->context);
         return NfcCommandStop;
     }
@@ -393,6 +442,7 @@ void sniffer_card_poller_start(
     instance->callback = callback;
     instance->context = context;
     instance->write_step = SnifferCardWriteStepWrite;
+    instance->write_variant = 0;
     instance->result = SnifferCardPollerResultWaiting;
     memset(&instance->identity, 0, sizeof(instance->identity));
     instance->trace_count = 0;
