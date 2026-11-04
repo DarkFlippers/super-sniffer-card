@@ -143,7 +143,3 @@ Each argument is a filename, optionally followed by the keys to press first.
 The protocol came from two places: the Proxmark3 Iceman firmware
 (`client/src/cmdhfmf.c`, `doc/magic_cards_notes.md`), and the vendor's own Android app,
 `com.fnstar.sniffercard`.
-
-## Licence
-
-GPL-3.0, same as the Flipper firmware this builds against.
